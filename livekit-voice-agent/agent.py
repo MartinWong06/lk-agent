@@ -2,7 +2,15 @@ import logging
 
 from dotenv import load_dotenv
 from livekit import agents
-from livekit.agents import Agent, AgentServer, AgentSession, JobContext, room_io
+from livekit.agents import (
+    Agent,
+    AgentServer,
+    AgentSession,
+    JobContext,
+    TurnHandlingOptions,
+    inference,
+    room_io,
+)
 from livekit.plugins import noise_cancellation, silero
 
 load_dotenv()
@@ -25,9 +33,13 @@ async def entrypoint(ctx: JobContext):
     # Configure the voice pipeline with STT, LLM, TTS, and VAD providers
     session = AgentSession(
         stt="assemblyai/universal-streaming:en",  # Speech-to-text provider
-        llm="openai/gpt-4.1-mini",                # Language model for responses
-        tts="cartesia/sonic-3",                   # Text-to-speech voice
-        vad=silero.VAD.load(),                    # Voice activity detection
+        llm="openai/gpt-4.1-mini",  # Language model for responses
+        tts="cartesia/sonic-3",  # Text-to-speech voice
+        vad=silero.VAD.load(),  # Voice activity detection
+        # Use the built-in audio turn detector (not the deprecated MultilingualModel plugin)
+        turn_handling=TurnHandlingOptions(
+            turn_detection=inference.TurnDetector(),
+        ),
     )
 
     # Start the session with noise cancellation enabled
