@@ -1,4 +1,5 @@
 import logging
+import time
 
 from dotenv import load_dotenv
 from livekit import agents
@@ -6,11 +7,14 @@ from livekit.agents import (
     Agent,
     AgentServer,
     AgentSession,
+    AgentStateChangedEvent,
     JobContext,
+    MetricsCollectedEvent,
     TurnHandlingOptions,
     UserInputTranscribedEvent,
     inference,
     llm,
+    metrics,
     room_io,
     stt,
     tts,
@@ -74,11 +78,38 @@ async def entrypoint(ctx: JobContext):
             ]
         ),
         vad=vad,
-        # Use the built-in audio turn detector (not the deprecated MultilingualModel plugin)
+        # Use the built-in audio turn detector (avoid deprecated MultilingualModel)
+        # and start forming a reply before the user finishes speaking
         turn_handling=TurnHandlingOptions(
             turn_detection=inference.TurnDetector(),
+            preemptive_generation={"enabled": True},
         ),
     )
+
+    # Aggregate data across all conversation turns
+    usage_collector = metrics.UsageCollector()
+
+    # Track End of Utterance timing (when turn detector decides user finished speaking)
+    last_eou_metrics: metrics.EOUMetrics | None = None
+
+    @session.on("metrics_collected")
+    def _on_metrics_collected(ev: MetricsCollectedEvent) -> None:
+        nonlocal last_eou_metrics
+        # Capture EOU metrics for TTFA calculation
+        if ev.metrics.type == "eou_metrics":
+            last_eou_metrics = ev.metrics
+
+        # Log each metric as it arrives and add to usage collector
+        metrics.log_metrics(ev.metrics)
+        usage_collector.collect(ev.metrics)
+
+    @session.on("agent_state_changed")
+    def _on_agent_state_changed(ev: AgentStateChangedEvent) -> None:
+        if ev.new_state == "speaking":
+            if last_eou_metrics:
+                # Calculate time since user finished speaking
+                elapsed = time.time() - last_eou_metrics.timestamp
+                logger.info("Time to first audio: %.3fs", elapsed)
 
     @session.on("user_input_transcribed")
     def _on_user_input(ev: UserInputTranscribedEvent) -> None:
@@ -88,6 +119,14 @@ async def entrypoint(ctx: JobContext):
     @session.on("error")
     def _on_error(ev) -> None:
         logger.error("session error: %s", ev.error)
+
+    async def log_usage() -> None:
+        # Print per-session summary (tokens, audio duration, costs)
+        summary = usage_collector.get_summary()
+        logger.info("Usage summary: %s", summary)
+
+    # Fire log_usage when worker shuts down
+    ctx.add_shutdown_callback(log_usage)
 
     # Start the session with noise cancellation enabled
     await session.start(
