@@ -10,7 +10,10 @@ from livekit.agents import (
     TurnHandlingOptions,
     UserInputTranscribedEvent,
     inference,
+    llm,
     room_io,
+    stt,
+    tts,
 )
 from livekit.plugins import noise_cancellation, silero
 
@@ -23,7 +26,11 @@ logger = logging.getLogger("assistant")
 class Assistant(Agent):
     def __init__(self) -> None:
         super().__init__(
-            instructions="You are a helpful voice AI assistant.",  # System prompt for the LLM
+            # Define personality: tone, style, and constraints
+            instructions=(
+                "You are an upbeat, slightly sarcastic voice AI for tech support. "
+                "Help the caller fix issues without rambling, and keep replies under 3 sentences."
+            ),
         )
 
     async def on_enter(self) -> None:
@@ -39,12 +46,34 @@ server = AgentServer()
 # The entrypoint function runs when a participant joins the room
 @server.rtc_session()
 async def entrypoint(ctx: JobContext):
+    vad = silero.VAD.load()
+
     # Configure the voice pipeline with STT, LLM, TTS, and VAD providers
     session = AgentSession(
-        stt="assemblyai/universal-streaming:en",  # Speech-to-text provider
-        llm="openai/gpt-4.1-mini",  # Language model for responses
-        tts="cartesia/sonic-3",  # Text-to-speech voice
-        vad=silero.VAD.load(),  # Voice activity detection
+        # LLM with fallback: OpenAI primary, Gemini backup
+        llm=llm.FallbackAdapter(
+            [
+                inference.LLM(model="openai/gpt-4.1-mini"),
+                inference.LLM(model="google/gemini-2.5-flash"),
+            ]
+        ),
+        # STT with fallback: AssemblyAI primary, Deepgram backup
+        stt=stt.FallbackAdapter(
+            [
+                inference.STT.from_model_string("assemblyai/universal-streaming:en"),
+                inference.STT.from_model_string("deepgram/nova-3"),
+            ]
+        ),
+        # TTS with fallback: Cartesia primary (custom voice), Inworld backup
+        tts=tts.FallbackAdapter(
+            [
+                inference.TTS.from_model_string(
+                    "cartesia/sonic-3:9626c31c-bec5-4cca-baa8-f8ba9e84c8bc"
+                ),
+                inference.TTS.from_model_string("inworld/inworld-tts-1"),
+            ]
+        ),
+        vad=vad,
         # Use the built-in audio turn detector (not the deprecated MultilingualModel plugin)
         turn_handling=TurnHandlingOptions(
             turn_detection=inference.TurnDetector(),
