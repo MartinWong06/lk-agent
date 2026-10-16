@@ -1326,6 +1326,7 @@ name = "livekit-voice-agent"
 version = "0.1.0"
 source = { virtual = "." }
 dependencies = [
+    { name = "httpx" },
     { name = "livekit-agents", version = "1.8.6", source = { registry = "https://pypi.org/simple" }, extra = ["silero"], marker = "python_full_version < '3.11'" },
     { name = "livekit-agents", version = "1.8.7", source = { registry = "https://pypi.org/simple" }, extra = ["silero"], marker = "python_full_version >= '3.11'" },
     { name = "livekit-plugins-noise-cancellation" },
@@ -1334,6 +1335,7 @@ dependencies = [
 
 [package.metadata]
 requires-dist = [
+    { name = "httpx", specifier = ">=0.28.1" },
     { name = "livekit-agents", extras = ["silero"], specifier = "~=1.8" },
     { name = "livekit-plugins-noise-cancellation", specifier = ">=0.2.5" },
     { name = "python-dotenv", specifier = ">=1.2.4" },
