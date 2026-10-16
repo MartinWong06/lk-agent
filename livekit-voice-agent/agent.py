@@ -1,7 +1,7 @@
 import logging
 import time
+
 import httpx
-from livekit.agents import function_tool, RunContext, ToolError
 from dotenv import load_dotenv
 from livekit import agents
 from livekit.agents import (
@@ -11,8 +11,11 @@ from livekit.agents import (
     AgentStateChangedEvent,
     JobContext,
     MetricsCollectedEvent,
+    RunContext,
+    ToolError,
     TurnHandlingOptions,
     UserInputTranscribedEvent,
+    function_tool,
     inference,
     llm,
     metrics,
@@ -20,6 +23,7 @@ from livekit.agents import (
     stt,
     tts,
 )
+from livekit.agents.llm.mcp import MCPServerHTTP, MCPToolset
 from livekit.plugins import noise_cancellation, silero
 
 load_dotenv()
@@ -34,61 +38,65 @@ class Assistant(Agent):
             instructions=(
                 "You are an upbeat, slightly sarcastic voice AI for tech support. "
                 "Help the caller fix issues without rambling, and keep replies under 3 sentences. "
-                "You can also look up the weather if asked."
+                "You can look up the weather if asked. You can also answer questions about "
+                "LiveKit by searching the documentation. When users ask about LiveKit "
+                "features, APIs, or how to build something, use the docs search tools "
+                "to find accurate information."
             ),
+            # LiveKit docs MCP — use MCPToolset (mcp_servers= on session is deprecated)
+            tools=[
+                MCPToolset(
+                    id="livekit-docs",
+                    mcp_server=MCPServerHTTP(url="https://docs.livekit.io/mcp"),
+                ),
+            ],
         )
 
-
-    # The @function_tool decorator registers this method as a tool the LLM can call
     @function_tool()
     async def lookup_weather(
         self,
-        context: RunContext,  # Gives access to the session, speech handle, and user data
-        location: str,  # Type hints help the LLM understand what arguments to pass
+        context: RunContext,
+        location: str,
     ) -> dict:
         """Look up current weather for a location.
-        
+
         Args:
             location: City name or location to get weather for.
         """
-        # The docstring above becomes the tool description the LLM sees
-        # when deciding which tool to call
-        
-        async with httpx.AsyncClient() as client:
-            # First, geocode the location to get coordinates
+        async with httpx.AsyncClient(timeout=10.0) as client:
             geo_response = await client.get(
                 "https://geocoding-api.open-meteo.com/v1/search",
-                params={"name": location, "count": 1}
+                params={"name": location, "count": 1},
             )
+            geo_response.raise_for_status()
             geo_data = geo_response.json()
-            
+
             if not geo_data.get("results"):
                 raise ToolError(f"Could not find location: {location}")
-            
-            lat = geo_data["results"][0]["latitude"]
-            lon = geo_data["results"][0]["longitude"]
-            place_name = geo_data["results"][0]["name"]
-            
-            # Get current weather for those coordinates
+
+            place = geo_data["results"][0]
+            lat = place["latitude"]
+            lon = place["longitude"]
+            place_name = place["name"]
+
             weather_response = await client.get(
                 "https://api.open-meteo.com/v1/forecast",
                 params={
                     "latitude": lat,
                     "longitude": lon,
                     "current": "temperature_2m,weather_code",
-                    "temperature_unit": "fahrenheit"
-                }
+                    "temperature_unit": "fahrenheit",
+                },
             )
+            weather_response.raise_for_status()
             weather = weather_response.json()
-            
-            # Return a dict with the weather data
-            # The LLM will use this to form a natural response
+
             return {
                 "location": place_name,
                 "temperature_f": weather["current"]["temperature_2m"],
-                "conditions": weather["current"]["weather_code"]
+                "conditions": weather["current"]["weather_code"],
             }
-            
+
     async def on_enter(self) -> None:
         # Speak first so console/dev sessions are not silent after connect
         await self.session.generate_reply(
@@ -130,8 +138,7 @@ async def entrypoint(ctx: JobContext):
             ]
         ),
         vad=vad,
-        # Use the built-in audio turn detector (avoid deprecated MultilingualModel)
-        # and start forming a reply before the user finishes speaking
+        # Use the built-in audio turn detector and preemptive generation
         turn_handling=TurnHandlingOptions(
             turn_detection=inference.TurnDetector(),
             preemptive_generation={"enabled": True},
@@ -147,21 +154,17 @@ async def entrypoint(ctx: JobContext):
     @session.on("metrics_collected")
     def _on_metrics_collected(ev: MetricsCollectedEvent) -> None:
         nonlocal last_eou_metrics
-        # Capture EOU metrics for TTFA calculation
         if ev.metrics.type == "eou_metrics":
             last_eou_metrics = ev.metrics
 
-        # Log each metric as it arrives and add to usage collector
         metrics.log_metrics(ev.metrics)
         usage_collector.collect(ev.metrics)
 
     @session.on("agent_state_changed")
     def _on_agent_state_changed(ev: AgentStateChangedEvent) -> None:
-        if ev.new_state == "speaking":
-            if last_eou_metrics:
-                # Calculate time since user finished speaking
-                elapsed = time.time() - last_eou_metrics.timestamp
-                logger.info("Time to first audio: %.3fs", elapsed)
+        if ev.new_state == "speaking" and last_eou_metrics:
+            elapsed = time.time() - last_eou_metrics.timestamp
+            logger.info("Time to first audio: %.3fs", elapsed)
 
     @session.on("user_input_transcribed")
     def _on_user_input(ev: UserInputTranscribedEvent) -> None:
@@ -173,20 +176,17 @@ async def entrypoint(ctx: JobContext):
         logger.error("session error: %s", ev.error)
 
     async def log_usage() -> None:
-        # Print per-session summary (tokens, audio duration, costs)
         summary = usage_collector.get_summary()
         logger.info("Usage summary: %s", summary)
 
-    # Fire log_usage when worker shuts down
     ctx.add_shutdown_callback(log_usage)
 
-    # Start the session with noise cancellation enabled
     await session.start(
         agent=Assistant(),
         room=ctx.room,
         room_options=room_io.RoomOptions(
             audio_input=room_io.AudioInputOptions(
-                noise_cancellation=noise_cancellation.BVC(),  # Background voice cancellation
+                noise_cancellation=noise_cancellation.BVC(),
             ),
         ),
     )
