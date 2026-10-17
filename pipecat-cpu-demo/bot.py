@@ -53,9 +53,9 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments) -> Non
     logger.info("Starting CPU cascade bot")
 
     stt = WhisperSTTService(
-        model=_whisper_model(),
         device="cpu",
         compute_type="int8",
+        settings=WhisperSTTService.Settings(model=_whisper_model()),
     )
 
     llm = OLLamaLLMService(
