@@ -13,18 +13,14 @@ from livekit.agents import (
     MetricsCollectedEvent,
     RunContext,
     ToolError,
-    TurnHandlingOptions,
     UserInputTranscribedEvent,
     function_tool,
     inference,
-    llm,
     metrics,
     room_io,
-    stt,
-    tts,
 )
 from livekit.agents.llm.mcp import MCPServerHTTP, MCPToolset
-from livekit.plugins import noise_cancellation, silero
+from livekit.plugins import noise_cancellation
 
 load_dotenv()
 
@@ -110,45 +106,19 @@ server = AgentServer()
 # The entrypoint function runs when a participant joins the room
 @server.rtc_session()
 async def entrypoint(ctx: JobContext):
-    vad = silero.VAD.load()
-
-    # Configure the voice pipeline with STT, LLM, TTS, and VAD providers
+    # Full-duplex speech-to-speech (GPT-Live): skip cascaded STT → LLM → TTS.
+    # The model listens and speaks at the same time and owns turn-taking.
     session = AgentSession(
-        # LLM with fallback: OpenAI primary, Gemini backup
-        llm=llm.FallbackAdapter(
-            [
-                inference.LLM(model="openai/gpt-4.1-mini"),
-                inference.LLM(model="google/gemini-2.5-flash"),
-            ]
-        ),
-        # STT with fallback: AssemblyAI primary, Deepgram backup
-        stt=stt.FallbackAdapter(
-            [
-                inference.STT.from_model_string("assemblyai/universal-streaming:en"),
-                inference.STT.from_model_string("deepgram/nova-3"),
-            ]
-        ),
-        # TTS with fallback: Cartesia primary (custom voice), Inworld backup
-        tts=tts.FallbackAdapter(
-            [
-                inference.TTS.from_model_string(
-                    "cartesia/sonic-3:9626c31c-bec5-4cca-baa8-f8ba9e84c8bc"
-                ),
-                inference.TTS.from_model_string("inworld/inworld-tts-1"),
-            ]
-        ),
-        vad=vad,
-        # Use the built-in audio turn detector and preemptive generation
-        turn_handling=TurnHandlingOptions(
-            turn_detection=inference.TurnDetector(),
-            preemptive_generation={"enabled": True},
+        llm=inference.DuplexModel(
+            model="openai/gpt-live-1",
+            voice="marin",
         ),
     )
 
     # Aggregate data across all conversation turns
     usage_collector = metrics.UsageCollector()
 
-    # Track End of Utterance timing (when turn detector decides user finished speaking)
+    # Track End of Utterance timing when available (may be limited on duplex models)
     last_eou_metrics: metrics.EOUMetrics | None = None
 
     @session.on("metrics_collected")
