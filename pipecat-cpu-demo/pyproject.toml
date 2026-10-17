@@ -1,0 +1,12 @@
+[project]
+name = "pipecat-cpu-demo"
+version = "0.1.0"
+description = "Local CPU-only Pipecat voice demo using SmallWebRTC (no Daily)"
+requires-python = ">=3.11,<3.15"
+dependencies = [
+    "pipecat-ai[webrtc,runner,whisper,kokoro]~=1.12",
+    "python-dotenv>=1.0.0",
+]
+
+[tool.uv]
+package = false
