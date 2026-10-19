@@ -7,4 +7,5 @@ dependencies = [
     "livekit-agents[mcp,silero]~=1.8",
     "livekit-plugins-noise-cancellation>=0.2.5",
     "python-dotenv>=1.2.4",
+    "pyyaml>=6.0.2",
 ]

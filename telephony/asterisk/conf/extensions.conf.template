@@ -1,0 +1,19 @@
+[general]
+static=yes
+writeprotect=no
+
+[from-internal]
+; Dial AI duplex agent via LiveKit SIP
+exten => __AI_EXTENSION__,1,NoOp(Routing to LiveKit duplex agent)
+ same => n,Set(CALLERID(num)=${CALLERID(num)})
+ same => n,Dial(PJSIP/${EXTEN}@livekit-sip,120)
+ same => n,Hangup()
+
+; Echo test for media sanity
+exten => 9196,1,Answer()
+ same => n,Echo()
+ same => n,Hangup()
+
+[from-livekit]
+exten => _X.,1,NoOp(Return from LiveKit ${EXTEN})
+ same => n,Hangup()

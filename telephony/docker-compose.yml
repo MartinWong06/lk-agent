@@ -1,0 +1,93 @@
+# HA-oriented reference stack:
+# Web softphone → Kamailio (edge) → Asterisk → LiveKit SIP → duplex agents
+#
+# Usage:
+#   cp .env.example .env   # fill LIVEKIT_* and passwords
+#   docker compose up -d --build
+#   open http://localhost:8088/
+
+name: enterprise-voice
+
+services:
+  rtpengine:
+    image: drachtio/rtpengine:latest
+    network_mode: host
+    # host networking simplifies ICE/RTP for local demos; use bridge + port maps in prod
+    restart: unless-stopped
+    profiles: ["full-media"]
+
+  kamailio:
+    build:
+      context: ./kamailio
+    restart: unless-stopped
+    ports:
+      - "5060:5060/udp"
+      - "5060:5060/tcp"
+      - "8080:8080"   # SIP over WebSocket (ws://host:8080)
+    environment:
+      SIP_DOMAIN: ${SIP_DOMAIN:-voice.local}
+      ASTERISK_HOST: asterisk
+      SOFTPHONE_USER: ${SOFTPHONE_USER:-1001}
+      SOFTPHONE_PASSWORD: ${SOFTPHONE_PASSWORD:-change-me-softphone}
+    volumes:
+      - ./kamailio/kamailio.cfg:/etc/kamailio/kamailio.cfg:ro
+      - ./kamailio/dispatcher.list:/etc/kamailio/dispatcher.list:ro
+    depends_on:
+      - asterisk
+    networks:
+      - voice
+
+  asterisk:
+    build:
+      context: ./asterisk
+    restart: unless-stopped
+    environment:
+      SIP_DOMAIN: ${SIP_DOMAIN:-voice.local}
+      SOFTPHONE_USER: ${SOFTPHONE_USER:-1001}
+      SOFTPHONE_PASSWORD: ${SOFTPHONE_PASSWORD:-change-me-softphone}
+      AI_EXTENSION: ${AI_EXTENSION:-1000}
+      LIVEKIT_SIP_HOST: ${LIVEKIT_SIP_HOST}
+      LIVEKIT_SIP_USERNAME: ${LIVEKIT_SIP_USERNAME:-asterisk-trunk}
+      LIVEKIT_SIP_PASSWORD: ${LIVEKIT_SIP_PASSWORD:-change-me-trunk-password}
+    volumes:
+      - ./asterisk/conf:/config:ro
+      - ./asterisk/entrypoint.sh:/entrypoint.sh:ro
+    entrypoint: ["/bin/sh", "/entrypoint.sh"]
+    networks:
+      - voice
+    # RTP media range for Asterisk ↔ LiveKit
+    ports:
+      - "10000-10100:10000-10100/udp"
+
+  softphone:
+    image: nginx:alpine
+    restart: unless-stopped
+    ports:
+      - "8088:80"
+    volumes:
+      - ./softphone:/usr/share/nginx/html:ro
+    networks:
+      - voice
+
+  agent:
+    build:
+      context: ../livekit-voice-agent
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      AGENT_CONFIG: /config/agent.yaml
+      AGENT_NAME: ${AGENT_NAME:-enterprise-voice}
+      LIVEKIT_URL: ${LIVEKIT_URL}
+      LIVEKIT_API_KEY: ${LIVEKIT_API_KEY}
+      LIVEKIT_API_SECRET: ${LIVEKIT_API_SECRET}
+    volumes:
+      - ./config/agent.yaml:/config/agent.yaml:ro
+    command: ["uv", "run", "agent.py", "start"]
+    # HA: scale workers sharing agent_name — docker compose up --scale agent=2
+    networks:
+      - voice
+
+networks:
+  voice:
+    driver: bridge

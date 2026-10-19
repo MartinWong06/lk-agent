@@ -1,0 +1,9 @@
+{
+  "wsServer": "ws://localhost:8080",
+  "domain": "voice.local",
+  "authorizationUser": "1001",
+  "password": "change-me-softphone",
+  "displayName": "Demo Softphone",
+  "aiExtension": "1000",
+  "traceSip": true
+}

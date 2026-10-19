@@ -1329,6 +1329,7 @@ dependencies = [
     { name = "livekit-agents", extra = ["mcp", "silero"] },
     { name = "livekit-plugins-noise-cancellation" },
     { name = "python-dotenv" },
+    { name = "pyyaml" },
 ]
 
 [package.metadata]
@@ -1337,6 +1338,7 @@ requires-dist = [
     { name = "livekit-agents", extras = ["mcp", "silero"], specifier = "~=1.8" },
     { name = "livekit-plugins-noise-cancellation", specifier = ">=0.2.5" },
     { name = "python-dotenv", specifier = ">=1.2.4" },
+    { name = "pyyaml", specifier = ">=6.0.2" },
 ]
 
 [[package]]

@@ -1,0 +1,2 @@
+# setid destination flags priority attributes
+1 sip:__ASTERISK_HOST__:5060 0 0
