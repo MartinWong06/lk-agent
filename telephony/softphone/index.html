@@ -1,0 +1,40 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Enterprise Voice Softphone</title>
+  <link rel="stylesheet" href="styles.css" />
+  <script src="https://cdn.jsdelivr.net/npm/sip.js@0.21.2/dist/sip.min.js"></script>
+</head>
+<body>
+  <main class="app">
+    <header>
+      <p class="brand">Enterprise Voice</p>
+      <h1>Web softphone</h1>
+      <p class="sub">Kamailio edge → Asterisk → LiveKit duplex agent</p>
+    </header>
+
+    <section class="panel">
+      <p id="status" class="status">Loading config…</p>
+      <div class="row">
+        <button id="btn-register" type="button">Register</button>
+        <button id="btn-unregister" type="button" disabled>Unregister</button>
+      </div>
+      <div class="row">
+        <label for="dest">Dial</label>
+        <input id="dest" type="text" value="1000" />
+        <button id="btn-call" type="button" disabled>Call AI</button>
+        <button id="btn-hangup" type="button" disabled>Hang up</button>
+      </div>
+      <audio id="remote-audio" autoplay playsinline></audio>
+    </section>
+
+    <section class="panel log-panel">
+      <h2>Log</h2>
+      <pre id="log"></pre>
+    </section>
+  </main>
+  <script src="app.js"></script>
+</body>
+</html>

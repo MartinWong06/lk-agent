@@ -1,7 +1,11 @@
 import logging
+import os
 import time
+from pathlib import Path
+from typing import Any
 
 import httpx
+import yaml
 from dotenv import load_dotenv
 from livekit import agents
 from livekit.agents import (
@@ -26,27 +30,74 @@ load_dotenv()
 
 logger = logging.getLogger("assistant")
 
+DEFAULT_INSTRUCTIONS = (
+    "You are an upbeat, slightly sarcastic voice AI for tech support. "
+    "Help the caller fix issues without rambling, and keep replies under 3 sentences. "
+    "You can look up the weather if asked. You can also answer questions about "
+    "LiveKit by searching the documentation. When users ask about LiveKit "
+    "features, APIs, or how to build something, use the docs search tools "
+    "to find accurate information."
+)
 
-# Define your agent's behavior by extending the Agent class
+
+def load_agent_config() -> dict[str, Any]:
+    """Load routine settings from AGENT_CONFIG YAML (no code redeploy for persona/voice)."""
+    path = os.getenv("AGENT_CONFIG", "").strip()
+    cfg: dict[str, Any] = {
+        "agent_name": os.getenv("AGENT_NAME", "enterprise-voice"),
+        "model": "openai/gpt-live-1",
+        "voice": "marin",
+        "instructions": DEFAULT_INSTRUCTIONS,
+        "tools": {"weather": True, "livekit_docs_mcp": True},
+    }
+    if not path:
+        return cfg
+    p = Path(path)
+    if not p.is_file():
+        logger.warning("AGENT_CONFIG not found at %s — using defaults", path)
+        return cfg
+    data = yaml.safe_load(p.read_text(encoding="utf-8")) or {}
+    if not isinstance(data, dict):
+        logger.warning("AGENT_CONFIG invalid — using defaults")
+        return cfg
+    cfg.update({k: v for k, v in data.items() if v is not None})
+    tools = cfg.get("tools") or {}
+    if isinstance(tools, dict):
+        cfg["tools"] = {
+            "weather": bool(tools.get("weather", True)),
+            "livekit_docs_mcp": bool(tools.get("livekit_docs_mcp", True)),
+        }
+    logger.info(
+        "Loaded agent config from %s (name=%s model=%s voice=%s)",
+        path,
+        cfg.get("agent_name"),
+        cfg.get("model"),
+        cfg.get("voice"),
+    )
+    return cfg
+
+
+AGENT_CFG = load_agent_config()
+
+
 class Assistant(Agent):
-    def __init__(self) -> None:
-        super().__init__(
-            instructions=(
-                "You are an upbeat, slightly sarcastic voice AI for tech support. "
-                "Help the caller fix issues without rambling, and keep replies under 3 sentences. "
-                "You can look up the weather if asked. You can also answer questions about "
-                "LiveKit by searching the documentation. When users ask about LiveKit "
-                "features, APIs, or how to build something, use the docs search tools "
-                "to find accurate information."
-            ),
-            # LiveKit docs MCP — use MCPToolset (mcp_servers= on session is deprecated)
-            tools=[
+    def __init__(self, config: dict[str, Any] | None = None) -> None:
+        config = config or AGENT_CFG
+        tools: list = []
+        tool_flags = config.get("tools") or {}
+        if tool_flags.get("livekit_docs_mcp", True):
+            tools.append(
                 MCPToolset(
                     id="livekit-docs",
                     mcp_server=MCPServerHTTP(url="https://docs.livekit.io/mcp"),
-                ),
-            ],
+                )
+            )
+
+        super().__init__(
+            instructions=str(config.get("instructions") or DEFAULT_INSTRUCTIONS),
+            tools=tools,
         )
+        self._weather_enabled = bool(tool_flags.get("weather", True))
 
     @function_tool()
     async def lookup_weather(
@@ -59,6 +110,9 @@ class Assistant(Agent):
         Args:
             location: City name or location to get weather for.
         """
+        if not self._weather_enabled:
+            raise ToolError("Weather tool is disabled in agent config")
+
         async with httpx.AsyncClient(timeout=10.0) as client:
             geo_response = await client.get(
                 "https://geocoding-api.open-meteo.com/v1/search",
@@ -94,31 +148,28 @@ class Assistant(Agent):
             }
 
     async def on_enter(self) -> None:
-        # Speak first so console/dev sessions are not silent after connect
         await self.session.generate_reply(
             instructions="Greet the user briefly and ask how you can help.",
         )
 
 
+AGENT_NAME = str(AGENT_CFG.get("agent_name") or "enterprise-voice")
 server = AgentServer()
 
 
-# The entrypoint function runs when a participant joins the room
-@server.rtc_session()
+@server.rtc_session(agent_name=AGENT_NAME)
 async def entrypoint(ctx: JobContext):
-    # Full-duplex speech-to-speech (GPT-Live): skip cascaded STT → LLM → TTS.
-    # The model listens and speaks at the same time and owns turn-taking.
+    # Full-duplex speech-to-speech (GPT-Live): model owns turn-taking.
+    model = str(AGENT_CFG.get("model") or "openai/gpt-live-1")
+    voice = str(AGENT_CFG.get("voice") or "marin")
     session = AgentSession(
         llm=inference.DuplexModel(
-            model="openai/gpt-live-1",
-            voice="marin",
+            model=model,
+            voice=voice,
         ),
     )
 
-    # Aggregate data across all conversation turns
     usage_collector = metrics.UsageCollector()
-
-    # Track End of Utterance timing when available (may be limited on duplex models)
     last_eou_metrics: metrics.EOUMetrics | None = None
 
     @session.on("metrics_collected")
@@ -152,7 +203,7 @@ async def entrypoint(ctx: JobContext):
     ctx.add_shutdown_callback(log_usage)
 
     await session.start(
-        agent=Assistant(),
+        agent=Assistant(AGENT_CFG),
         room=ctx.room,
         room_options=room_io.RoomOptions(
             audio_input=room_io.AudioInputOptions(
@@ -164,4 +215,5 @@ async def entrypoint(ctx: JobContext):
 
 if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO)
+    logger.info("Starting worker agent_name=%s", AGENT_NAME)
     agents.cli.run_app(server)

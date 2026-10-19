@@ -1,0 +1,118 @@
+:root {
+  --bg: #0f1419;
+  --panel: #1a222c;
+  --text: #e8eef4;
+  --muted: #8b9aab;
+  --accent: #3d9cfd;
+  --ok: #3ecf8e;
+  --warn: #f0b429;
+  --font: "Segoe UI", system-ui, sans-serif;
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  min-height: 100vh;
+  font-family: var(--font);
+  color: var(--text);
+  background:
+    radial-gradient(ellipse 80% 50% at 20% 0%, #1a3a5c 0%, transparent 55%),
+    radial-gradient(ellipse 60% 40% at 100% 100%, #143028 0%, transparent 50%),
+    var(--bg);
+}
+
+.app {
+  max-width: 42rem;
+  margin: 0 auto;
+  padding: 2.5rem 1.25rem 3rem;
+}
+
+.brand {
+  margin: 0;
+  font-size: 0.85rem;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--accent);
+}
+
+h1 {
+  margin: 0.35rem 0 0.25rem;
+  font-size: 2rem;
+  font-weight: 650;
+}
+
+.sub { margin: 0; color: var(--muted); }
+
+.panel {
+  margin-top: 1.5rem;
+  padding: 1.25rem;
+  background: color-mix(in srgb, var(--panel) 92%, transparent);
+  border: 1px solid #2a3542;
+  border-radius: 12px;
+}
+
+.status {
+  margin: 0 0 1rem;
+  color: var(--warn);
+  font-family: ui-monospace, monospace;
+  font-size: 0.9rem;
+}
+
+.status.ok { color: var(--ok); }
+
+.row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  align-items: center;
+  margin-bottom: 0.75rem;
+}
+
+label { color: var(--muted); }
+
+input {
+  flex: 1;
+  min-width: 6rem;
+  padding: 0.55rem 0.7rem;
+  border-radius: 8px;
+  border: 1px solid #2a3542;
+  background: #0d1218;
+  color: var(--text);
+}
+
+button {
+  padding: 0.55rem 0.9rem;
+  border-radius: 8px;
+  border: 1px solid #2a3542;
+  background: #243040;
+  color: var(--text);
+  cursor: pointer;
+}
+
+button:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+#btn-call, #btn-register {
+  background: var(--accent);
+  border-color: transparent;
+  color: #041018;
+  font-weight: 600;
+}
+
+.log-panel h2 {
+  margin: 0 0 0.5rem;
+  font-size: 0.95rem;
+  color: var(--muted);
+}
+
+#log {
+  margin: 0;
+  max-height: 14rem;
+  overflow: auto;
+  font-size: 0.75rem;
+  color: #b7c4d4;
+  white-space: pre-wrap;
+}
