@@ -11,6 +11,7 @@ LIVEKIT_SIP_PASSWORD="${LIVEKIT_SIP_PASSWORD:-change-me-trunk-password}"
 
 if [ -z "$LIVEKIT_SIP_HOST" ]; then
   echo "WARNING: LIVEKIT_SIP_HOST is empty — AI dial to LiveKit will fail until set."
+  LIVEKIT_SIP_HOST="sip.invalid"
 fi
 
 # Render configs from templates

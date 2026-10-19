@@ -31,9 +31,15 @@ services:
       SOFTPHONE_PASSWORD: ${SOFTPHONE_PASSWORD:-change-me-softphone}
     volumes:
       - ./kamailio/kamailio.cfg:/etc/kamailio/kamailio.cfg:ro
-      - ./kamailio/dispatcher.list:/etc/kamailio/dispatcher.list:ro
+      - ./kamailio/dispatcher.list:/etc/kamailio/dispatcher.list.template:ro
     depends_on:
       - asterisk
+    healthcheck:
+      test: ["CMD-SHELL", "pgrep -x kamailio >/dev/null || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 8
+      start_period: 15s
     networks:
       - voice
 
@@ -53,6 +59,12 @@ services:
       - ./asterisk/conf:/config:ro
       - ./asterisk/entrypoint.sh:/entrypoint.sh:ro
     entrypoint: ["/bin/sh", "/entrypoint.sh"]
+    healthcheck:
+      test: ["CMD-SHELL", "asterisk -rx 'core show version' >/dev/null 2>&1 || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
     networks:
       - voice
     # RTP media range for Asterisk ↔ LiveKit
@@ -60,12 +72,23 @@ services:
       - "10000-10100:10000-10100/udp"
 
   softphone:
-    image: nginx:alpine
+    build:
+      context: ./softphone
     restart: unless-stopped
     ports:
       - "8088:80"
-    volumes:
-      - ./softphone:/usr/share/nginx/html:ro
+    environment:
+      SIP_DOMAIN: ${SIP_DOMAIN:-voice.local}
+      SOFTPHONE_USER: ${SOFTPHONE_USER:-1001}
+      SOFTPHONE_PASSWORD: ${SOFTPHONE_PASSWORD:-change-me-softphone}
+      AI_EXTENSION: ${AI_EXTENSION:-1000}
+      # Browser reaches Kamailio on the host-mapped port
+      SOFTPHONE_WS_SERVER: ${SOFTPHONE_WS_SERVER:-ws://localhost:8080}
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1/"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
     networks:
       - voice
 

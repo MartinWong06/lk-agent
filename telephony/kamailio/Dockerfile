@@ -11,7 +11,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 
 COPY kamailio.cfg /etc/kamailio/kamailio.cfg
-COPY dispatcher.list /etc/kamailio/dispatcher.list
+COPY dispatcher.list /etc/kamailio/dispatcher.list.template
 COPY entrypoint.sh /entrypoint.sh
 RUN chmod +x /entrypoint.sh
 

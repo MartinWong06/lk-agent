@@ -26,11 +26,13 @@ cp .env.example .env
 # Edit .env: LIVEKIT_URL, LIVEKIT_API_KEY, LIVEKIT_API_SECRET,
 #           LIVEKIT_SIP_HOST, passwords
 
+# Static artifact check (no Docker)
+python3 scripts/validate_stack.py
+
 # One-time: create inbound trunk + explicit agent dispatch
 uv run --with livekit-api --with python-dotenv python livekit/setup_sip.py
 
-# Align softphone password with .env
-# Edit softphone/config.json → password + wsServer if needed
+# Softphone UI password/WS URL are rendered from .env at container start
 
 docker compose up -d --build --scale agent=2
 ```
