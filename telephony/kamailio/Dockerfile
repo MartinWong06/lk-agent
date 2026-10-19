@@ -8,6 +8,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     kamailio-utils-modules \
     kamailio-extra-modules \
     ca-certificates \
+    procps \
     && rm -rf /var/lib/apt/lists/*
 
 COPY kamailio.cfg /etc/kamailio/kamailio.cfg
