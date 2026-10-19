@@ -55,6 +55,7 @@ services:
       LIVEKIT_SIP_HOST: ${LIVEKIT_SIP_HOST}
       LIVEKIT_SIP_USERNAME: ${LIVEKIT_SIP_USERNAME:-asterisk-trunk}
       LIVEKIT_SIP_PASSWORD: ${LIVEKIT_SIP_PASSWORD:-change-me-trunk-password}
+      LIVEKIT_DID: ${LIVEKIT_DID:-+15555550100}
       EXTERNAL_SIP_IP: ${EXTERNAL_SIP_IP}
     volumes:
       - ./asterisk/conf:/config:ro

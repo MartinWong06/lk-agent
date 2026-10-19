@@ -20,11 +20,15 @@ Pipecat is not used here. AI is **full duplex** via the existing LiveKit agent.
 
 ### Critical: SIP host ≠ WebSocket subdomain
 
-`LIVEKIT_SIP_HOST` must be the SIP endpoint shown in **LiveKit Cloud → Project Settings**
-(e.g. `xxxxxxxx.sip.livekit.cloud`).
+`LIVEKIT_SIP_HOST` is `<project_id without p_>.sip.livekit.cloud`.
 
-Do **not** assume it equals the `wss://…livekit.cloud` subdomain. Using the wrong SIP
-host yields `SIP/2.0 404 No trunk found` even when trunks exist via the API.
+Example: agent logs show `project_id:p_25v23ne9zzm` → `25v23ne9zzm.sip.livekit.cloud`.
+
+The `wss://martin-….livekit.cloud` subdomain is **not** the SIP host. Wrong host →
+`SIP/2.0 404 No trunk found` even when trunks exist via the API.
+
+Also set `LIVEKIT_DID` to the exact trunk number (e.g. `+15555550100`). Softphone still
+dials extension `1000`; Asterisk maps that to the DID.
 
 ## Quick start
 
@@ -102,10 +106,14 @@ Optional profile `full-media` includes an rtpengine image for advanced WebRTC br
 ## Verified on reference host
 
 - Softphone UI healthy (`:8088`), config rendered from `.env`
-- Kamailio healthy (`:5060`, WS `:8080`)
-- Asterisk healthy; dialplan `1000` → `PJSIP/...@livekit-sip` (TCP)
-- Duplex worker registers as `agent_name=enterprise-voice`
-- End-to-end LiveKit answer requires the **correct Project Settings SIP host** in `.env`
+- Kamailio healthy (`:5060`, WS `:8080`) when not using host-Asterisk overlay
+- Asterisk → LiveKit SIP (`25v23ne9zzm.sip.livekit.cloud`): `100` / `180` / `200 OK`
+- Duplex worker `enterprise-voice` received job, joined room `call-_1000_*`,
+  linked `sip_1000`, ran `openai/gpt-live-1`
+- `agent.yaml` drives persona/voice/model without code changes
+- For Cloud SIP behind NAT, use:
+  `docker compose -f docker-compose.yml -f docker-compose.host-asterisk.yml up -d asterisk`
+  (stop Kamailio first — both want host `:5060`)
 
 ## Phase 2 (not in this compose)
 

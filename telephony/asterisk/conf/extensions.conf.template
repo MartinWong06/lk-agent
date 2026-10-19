@@ -3,10 +3,10 @@ static=yes
 writeprotect=no
 
 [from-internal]
-; Dial AI duplex agent via LiveKit SIP
+; Softphone dials __AI_EXTENSION__; Asterisk bridges to LiveKit DID on the inbound trunk
 exten => __AI_EXTENSION__,1,NoOp(Routing to LiveKit duplex agent)
- same => n,Set(CALLERID(num)=${CALLERID(num)})
- same => n,Dial(PJSIP/${EXTEN}@livekit-sip,120)
+ same => n,Set(CALLERID(num)=${IF($[${LEN(${CALLERID(num)})}>0]?${CALLERID(num)}:1001)})
+ same => n,Dial(PJSIP/__LIVEKIT_DID__@livekit-sip,120)
  same => n,Hangup()
 
 ; Echo test for media sanity
