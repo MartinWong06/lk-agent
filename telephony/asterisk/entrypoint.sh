@@ -8,10 +8,16 @@ AI_EXTENSION="${AI_EXTENSION:-1000}"
 LIVEKIT_SIP_HOST="${LIVEKIT_SIP_HOST:-}"
 LIVEKIT_SIP_USERNAME="${LIVEKIT_SIP_USERNAME:-asterisk-trunk}"
 LIVEKIT_SIP_PASSWORD="${LIVEKIT_SIP_PASSWORD:-change-me-trunk-password}"
+EXTERNAL_SIP_IP="${EXTERNAL_SIP_IP:-}"
 
 if [ -z "$LIVEKIT_SIP_HOST" ]; then
   echo "WARNING: LIVEKIT_SIP_HOST is empty — AI dial to LiveKit will fail until set."
   LIVEKIT_SIP_HOST="sip.invalid"
+fi
+
+if [ -z "$EXTERNAL_SIP_IP" ]; then
+  EXTERNAL_SIP_IP="$(hostname -I 2>/dev/null | awk '{print $1}')"
+  echo "WARNING: EXTERNAL_SIP_IP unset — using ${EXTERNAL_SIP_IP}"
 fi
 
 # Render configs from templates
@@ -24,6 +30,7 @@ render() {
     -e "s|__LIVEKIT_SIP_HOST__|${LIVEKIT_SIP_HOST}|g" \
     -e "s|__LIVEKIT_SIP_USERNAME__|${LIVEKIT_SIP_USERNAME}|g" \
     -e "s|__LIVEKIT_SIP_PASSWORD__|${LIVEKIT_SIP_PASSWORD}|g" \
+    -e "s|__EXTERNAL_SIP_IP__|${EXTERNAL_SIP_IP}|g" \
     "$1" > "$2"
 }
 

@@ -55,6 +55,7 @@ services:
       LIVEKIT_SIP_HOST: ${LIVEKIT_SIP_HOST}
       LIVEKIT_SIP_USERNAME: ${LIVEKIT_SIP_USERNAME:-asterisk-trunk}
       LIVEKIT_SIP_PASSWORD: ${LIVEKIT_SIP_PASSWORD:-change-me-trunk-password}
+      EXTERNAL_SIP_IP: ${EXTERNAL_SIP_IP}
     volumes:
       - ./asterisk/conf:/config:ro
       - ./asterisk/entrypoint.sh:/entrypoint.sh:ro
@@ -96,6 +97,8 @@ services:
     build:
       context: ../livekit-voice-agent
     restart: unless-stopped
+    # Host networking avoids Docker bridge WSS timeouts to LiveKit Cloud in many setups
+    network_mode: host
     env_file:
       - .env
     environment:
@@ -108,8 +111,7 @@ services:
       - ./config/agent.yaml:/config/agent.yaml:ro
     command: ["uv", "run", "agent.py", "start"]
     # HA: scale workers sharing agent_name — docker compose up --scale agent=2
-    networks:
-      - voice
+    # Note: with network_mode:host, --scale may collide on ports; use multiple hosts in prod.
 
 networks:
   voice:

@@ -38,7 +38,9 @@ async def main() -> int:
 
     lk = api.LiveKitAPI(url=url, api_key=key, api_secret=secret)
 
-    allowed_addresses = [a.strip() for a in allow.split(",") if a.strip()] or None
+    # Prefer auth-only trunks for NAT’d Asterisk; IP allowlist is optional and brittle
+    # when cloud egress IPs change.
+    allowed_addresses = [a.strip() for a in allow.split(",") if a.strip()]
 
     trunk = await lk.sip.create_sip_inbound_trunk(
         api.CreateSIPInboundTrunkRequest(

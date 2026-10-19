@@ -16,7 +16,15 @@ Pipecat is not used here. AI is **full duplex** via the existing LiveKit agent.
 
 - Docker + Docker Compose
 - LiveKit Cloud project (or self-hosted) with **SIP** enabled
-- API key/secret and SIP host from the LiveKit project
+- API key/secret and **SIP URI host from Project Settings** (Cloud dashboard)
+
+### Critical: SIP host ≠ WebSocket subdomain
+
+`LIVEKIT_SIP_HOST` must be the SIP endpoint shown in **LiveKit Cloud → Project Settings**
+(e.g. `xxxxxxxx.sip.livekit.cloud`).
+
+Do **not** assume it equals the `wss://…livekit.cloud` subdomain. Using the wrong SIP
+host yields `SIP/2.0 404 No trunk found` even when trunks exist via the API.
 
 ## Quick start
 
@@ -84,9 +92,20 @@ Optional profile `full-media` includes an rtpengine image for advanced WebRTC br
 
 ## Troubleshooting
 
-- Softphone cannot register: check Kamailio logs (`docker compose logs kamailio`) and `wsServer` in `config.json`
-- Call rings but no AI: confirm `setup_sip.py` ran, `LIVEKIT_SIP_HOST` matches Cloud SIP, agents are online (`docker compose logs agent`)
+- Softphone cannot register: check Kamailio logs (`docker compose logs kamailio`) and `wsServer` / env-rendered `config.json`
+- `404 No trunk found` from LiveKit: wrong `LIVEKIT_SIP_HOST` (see above) or trunk numbers / `allowed_addresses` mismatch
+- Agent `Connection timeout` to LiveKit from Docker: agents use `network_mode: host` in compose for Cloud WSS
+- Asterisk cannot reach LiveKit SIP through bridge NAT: try `docker-compose.host-asterisk.yml` (stop Kamailio first — port 5060 clash)
+- Set `EXTERNAL_SIP_IP` to your current public egress IP (it can rotate on cloud VMs)
 - One-way audio: open UDP 10000–10100; for remote browsers, set public IPs / TLS WSS and ICE carefully
+
+## Verified on reference host
+
+- Softphone UI healthy (`:8088`), config rendered from `.env`
+- Kamailio healthy (`:5060`, WS `:8080`)
+- Asterisk healthy; dialplan `1000` → `PJSIP/...@livekit-sip` (TCP)
+- Duplex worker registers as `agent_name=enterprise-voice`
+- End-to-end LiveKit answer requires the **correct Project Settings SIP host** in `.env`
 
 ## Phase 2 (not in this compose)
 

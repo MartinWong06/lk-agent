@@ -9,8 +9,16 @@ endpoint_identifier_order=username,ip,anonymous
 type=transport
 protocol=udp
 bind=0.0.0.0:5060
-external_media_address=
-external_signaling_address=
+external_media_address=__EXTERNAL_SIP_IP__
+external_signaling_address=__EXTERNAL_SIP_IP__
+
+; LiveKit Cloud SIP expects TCP in many deployments
+[transport-tcp]
+type=transport
+protocol=tcp
+bind=0.0.0.0:5060
+external_media_address=__EXTERNAL_SIP_IP__
+external_signaling_address=__EXTERNAL_SIP_IP__
 
 ; ---------- Softphone endpoint ----------
 [__SOFTPHONE_USER__]
@@ -53,19 +61,23 @@ password=__LIVEKIT_SIP_PASSWORD__
 
 [livekit-aor]
 type=aor
-contact=sip:__LIVEKIT_SIP_HOST__:5060
-qualify_frequency=60
+contact=sip:__LIVEKIT_SIP_HOST__:5060\;transport=tcp
+; Disable OPTIONS qualify — Cloud SIP may not answer OPTIONS from NAT’d peers
+qualify_frequency=0
 
 [livekit-sip]
 type=endpoint
-transport=transport-udp
+transport=transport-tcp
 context=from-livekit
 disallow=all
 allow=ulaw,alaw,opus
 outbound_auth=livekit-auth
 aors=livekit-aor
 from_domain=__SIP_DOMAIN__
+from_user=__AI_EXTENSION__
 direct_media=no
 rtp_symmetric=yes
 force_rport=yes
 rewrite_contact=yes
+media_encryption=no
+language=en

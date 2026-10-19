@@ -1,0 +1,9 @@
+# Optional overlay when Docker bridge SIP to LiveKit Cloud fails (NAT).
+# Usage (stop kamailio first — port 5060 conflict):
+#   docker compose stop kamailio
+#   docker compose -f docker-compose.yml -f docker-compose.host-asterisk.yml up -d asterisk
+services:
+  asterisk:
+    network_mode: host
+    networks: !reset []
+    ports: !reset []
