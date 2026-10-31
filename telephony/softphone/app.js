@@ -16,6 +16,7 @@
   let session = null;
   let callInFlight = false;
   let registered = false;
+  let boundPeerConnection = null;
 
   function log(msg) {
     const line = `[${new Date().toISOString().slice(11, 19)}] ${msg}`;
@@ -41,6 +42,30 @@
     btnHangup.disabled = !on;
   }
 
+  function bindRemoteStream(stream, label) {
+    if (!stream || !stream.getTracks().length) return;
+    // Avoid srcObject churn — re-assigning mid-play() causes:
+    // "The play() request was interrupted by a new load request."
+    if (remoteAudio.srcObject === stream) return;
+    const prev = remoteAudio.srcObject;
+    if (prev && prev.getAudioTracks && prev.getAudioTracks()[0] === stream.getAudioTracks()[0]) {
+      return;
+    }
+    remoteAudio.srcObject = stream;
+    remoteAudio.muted = false;
+    remoteAudio.volume = 1;
+    const p = remoteAudio.play();
+    if (p && typeof p.then === "function") {
+      p.catch((e) => {
+        const msg = e && e.message ? e.message : String(e);
+        // Benign when a later bind supersedes an in-flight play()
+        if (/interrupted by a new load/i.test(msg)) return;
+        log(`audio play blocked: ${msg}`);
+      });
+    }
+    log(`remote audio attached (${label}) tracks=${stream.getAudioTracks().length}`);
+  }
+
   function attachRemoteAudio(sdh, label) {
     if (!sdh || !sdh.peerConnection) {
       log(`audio attach skipped (${label}): no peerConnection`);
@@ -48,32 +73,24 @@
     }
     const pc = sdh.peerConnection;
 
-    const bindStream = (stream) => {
-      if (!stream) return;
-      remoteAudio.srcObject = stream;
-      remoteAudio.play().catch((e) => log(`audio play blocked: ${e.message || e}`));
-      log(`remote audio attached (${label}) tracks=${stream.getAudioTracks().length}`);
-    };
+    // Wire ontrack once per PeerConnection
+    if (boundPeerConnection !== pc) {
+      boundPeerConnection = pc;
+      pc.addEventListener("track", (ev) => {
+        if (ev.streams && ev.streams[0]) {
+          bindRemoteStream(ev.streams[0], "track");
+          return;
+        }
+        if (ev.track) bindRemoteStream(new MediaStream([ev.track]), "track");
+      });
+    }
 
-    // Prefer live track events (tracks may arrive after Established)
-    pc.addEventListener("track", (ev) => {
-      if (ev.streams && ev.streams[0]) {
-        bindStream(ev.streams[0]);
-        return;
-      }
-      if (ev.track) {
-        const stream = new MediaStream([ev.track]);
-        bindStream(stream);
-      }
-    });
-
-    // Also bind any receivers already present
     try {
       const stream = new MediaStream();
       pc.getReceivers().forEach((r) => {
         if (r.track) stream.addTrack(r.track);
       });
-      if (stream.getTracks().length) bindStream(stream);
+      if (stream.getTracks().length) bindRemoteStream(stream, label);
     } catch (e) {
       log(`audio receivers error: ${e}`);
     }
@@ -193,6 +210,7 @@
       if (state === "Terminated") {
         if (session === thisSession) {
           session = null;
+          boundPeerConnection = null;
           setInCall(false);
           setStatus("Registered", true);
           remoteAudio.srcObject = null;
@@ -225,6 +243,7 @@
     }
     if (session === s) {
       session = null;
+      boundPeerConnection = null;
       setInCall(false);
       remoteAudio.srcObject = null;
     }
