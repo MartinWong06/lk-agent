@@ -96,12 +96,19 @@ Optional profile `full-media` includes an rtpengine image for advanced WebRTC br
 
 ## Troubleshooting
 
+- Softphone / Kamailio crash-loop with `exec ...entrypoint.sh: no such file or directory`:
+  Windows CRLF line endings broke the Linux shebang. Rebuild after pulling this branch
+  (`docker compose up -d --build --force-recreate softphone kamailio asterisk`).
+  Images strip `\r` at build time; entrypoints also strip host-mounted configs.
 - Softphone cannot register: check Kamailio logs (`docker compose logs kamailio`) and `wsServer` / env-rendered `config.json`
 - `404 No trunk found` from LiveKit: wrong `LIVEKIT_SIP_HOST` (see above) or trunk numbers / `allowed_addresses` mismatch
 - Agent `Connection timeout` to LiveKit from Docker: agents use `network_mode: host` in compose for Cloud WSS
 - Asterisk cannot reach LiveKit SIP through bridge NAT: try `docker-compose.host-asterisk.yml` (stop Kamailio first — port 5060 clash)
 - Set `EXTERNAL_SIP_IP` to your current public egress IP (it can rotate on cloud VMs)
 - One-way audio: open UDP 10000–10100; for remote browsers, set public IPs / TLS WSS and ICE carefully
+- `setup_sip.py` `Conflicting inbound SIP Trunks`: trunk already exists — skip the script or update
+  the existing trunk in LiveKit Cloud (do not re-create the same DID)
+- On Windows with `network_mode: host` agents, prefer `--scale agent=1` for the first call test
 
 ## Verified on reference host
 

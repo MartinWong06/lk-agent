@@ -21,9 +21,9 @@ if [ -z "$EXTERNAL_SIP_IP" ]; then
   echo "WARNING: EXTERNAL_SIP_IP unset — using ${EXTERNAL_SIP_IP}"
 fi
 
-# Render configs from templates
+# Render configs from templates (strip CRLF from Windows bind mounts)
 render() {
-  sed \
+  tr -d '\r' < "$1" | sed \
     -e "s|__SIP_DOMAIN__|${SIP_DOMAIN}|g" \
     -e "s|__SOFTPHONE_USER__|${SOFTPHONE_USER}|g" \
     -e "s|__SOFTPHONE_PASSWORD__|${SOFTPHONE_PASSWORD}|g" \
@@ -33,20 +33,22 @@ render() {
     -e "s|__LIVEKIT_SIP_PASSWORD__|${LIVEKIT_SIP_PASSWORD}|g" \
     -e "s|__LIVEKIT_DID__|${LIVEKIT_DID}|g" \
     -e "s|__EXTERNAL_SIP_IP__|${EXTERNAL_SIP_IP}|g" \
-    "$1" > "$2"
+    > "$2"
 }
 
 render /config/pjsip.conf.template /etc/asterisk/pjsip.conf
 render /config/extensions.conf.template /etc/asterisk/extensions.conf
-cp /config/modules.conf /etc/asterisk/modules.conf
-cp /config/rtp.conf /etc/asterisk/rtp.conf
-cp /config/asterisk.conf /etc/asterisk/asterisk.conf 2>/dev/null || true
+tr -d '\r' < /config/modules.conf > /etc/asterisk/modules.conf
+tr -d '\r' < /config/rtp.conf > /etc/asterisk/rtp.conf
+if [ -f /config/asterisk.conf ]; then
+  tr -d '\r' < /config/asterisk.conf > /etc/asterisk/asterisk.conf
+fi
 
 # Prefer stock logger if present
 if [ -f /etc/asterisk/logger.conf ]; then
   :
 elif [ -f /config/logger.conf ]; then
-  cp /config/logger.conf /etc/asterisk/logger.conf
+  tr -d '\r' < /config/logger.conf > /etc/asterisk/logger.conf
 fi
 
 exec asterisk -f -vvv

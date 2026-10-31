@@ -14,8 +14,11 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 COPY kamailio.cfg /etc/kamailio/kamailio.cfg
 COPY dispatcher.list /etc/kamailio/dispatcher.list.template
 COPY entrypoint.sh /entrypoint.sh
-RUN chmod +x /entrypoint.sh
+# Strip CRLF from Windows checkouts; invoke via /bin/sh so shebang \r cannot break exec
+RUN sed -i 's/\r$//' /entrypoint.sh /etc/kamailio/kamailio.cfg \
+        /etc/kamailio/dispatcher.list.template \
+    && chmod +x /entrypoint.sh
 
 EXPOSE 5060/udp 5060/tcp 8080
 
-ENTRYPOINT ["/entrypoint.sh"]
+ENTRYPOINT ["/bin/sh", "/entrypoint.sh"]
