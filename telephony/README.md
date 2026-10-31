@@ -115,6 +115,10 @@ Optional profile `full-media` includes an rtpengine image for advanced WebRTC br
 - Softphone log `audio attach error: ... sessionDescriptionHandler`: fixed by attaching media via
   `onSessionDescriptionHandler` / `track` events and blocking overlapping Call AI clicks.
   Recreate softphone + hard-refresh. Click **Call AI once**; use Hang up before redialing.
+- Call **Established** but **no mic / no sound**: WebRTC RTP must hit Asterisk on an address the
+  browser can reach. Set `SOFTPHONE_MEDIA_IP=127.0.0.1` for Docker Desktop local UI (default),
+  keep `EXTERNAL_SIP_IP` as your public WAN for LiveKit, recreate Asterisk, allow mic in the
+  browser. Log should show `iceConnectionState=connected` and `micTracks=1`.
 - Softphone cannot register: check Kamailio logs (`docker compose logs kamailio`) and `wsServer` / env-rendered `config.json`
 - `404 No trunk found` from LiveKit: wrong `LIVEKIT_SIP_HOST` (see above) or trunk numbers / `allowed_addresses` mismatch
 - Agent `Connection timeout` to LiveKit from Docker: agents use `network_mode: host` in compose for Cloud WSS

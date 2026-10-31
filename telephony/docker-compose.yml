@@ -66,6 +66,8 @@ services:
       LIVEKIT_SIP_PASSWORD: ${LIVEKIT_SIP_PASSWORD:-change-me-trunk-password}
       LIVEKIT_DID: ${LIVEKIT_DID:-+15555550100}
       EXTERNAL_SIP_IP: ${EXTERNAL_SIP_IP}
+      # Browser-reachable RTP address for local softphone (not the WAN IP)
+      SOFTPHONE_MEDIA_IP: ${SOFTPHONE_MEDIA_IP:-127.0.0.1}
     volumes:
       - ./asterisk/conf:/config:ro
       - ./asterisk/entrypoint.sh:/entrypoint.sh:ro

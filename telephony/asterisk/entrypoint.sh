@@ -10,6 +10,8 @@ LIVEKIT_SIP_USERNAME="${LIVEKIT_SIP_USERNAME:-asterisk-trunk}"
 LIVEKIT_SIP_PASSWORD="${LIVEKIT_SIP_PASSWORD:-change-me-trunk-password}"
 LIVEKIT_DID="${LIVEKIT_DID:-+15555550100}"
 EXTERNAL_SIP_IP="${EXTERNAL_SIP_IP:-}"
+# IP the BROWSER uses to reach Asterisk RTP (Docker Desktop local UI → 127.0.0.1)
+SOFTPHONE_MEDIA_IP="${SOFTPHONE_MEDIA_IP:-127.0.0.1}"
 
 if [ -z "$LIVEKIT_SIP_HOST" ]; then
   echo "WARNING: LIVEKIT_SIP_HOST is empty — AI dial to LiveKit will fail until set."
@@ -20,6 +22,8 @@ if [ -z "$EXTERNAL_SIP_IP" ]; then
   EXTERNAL_SIP_IP="$(hostname -I 2>/dev/null | awk '{print $1}')"
   echo "WARNING: EXTERNAL_SIP_IP unset — using ${EXTERNAL_SIP_IP}"
 fi
+
+echo "Softphone WebRTC media_address=${SOFTPHONE_MEDIA_IP} (LiveKit external=${EXTERNAL_SIP_IP})"
 
 # Render configs from templates (strip CRLF from Windows bind mounts)
 render() {
@@ -33,6 +37,7 @@ render() {
     -e "s|__LIVEKIT_SIP_PASSWORD__|${LIVEKIT_SIP_PASSWORD}|g" \
     -e "s|__LIVEKIT_DID__|${LIVEKIT_DID}|g" \
     -e "s|__EXTERNAL_SIP_IP__|${EXTERNAL_SIP_IP}|g" \
+    -e "s|__SOFTPHONE_MEDIA_IP__|${SOFTPHONE_MEDIA_IP}|g" \
     > "$2"
 }
 

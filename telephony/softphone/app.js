@@ -66,6 +66,27 @@
     log(`remote audio attached (${label}) tracks=${stream.getAudioTracks().length}`);
   }
 
+  function logMediaState(pc, label) {
+    try {
+      const senders = pc.getSenders().filter((s) => s.track);
+      const receivers = pc.getReceivers().filter((r) => r.track);
+      log(
+        `media(${label}) ice=${pc.iceConnectionState} conn=${pc.connectionState} ` +
+          `micTracks=${senders.length} remoteTracks=${receivers.length}`
+      );
+      senders.forEach((s) => {
+        const t = s.track;
+        log(`  mic: enabled=${t.enabled} muted=${t.muted} ready=${t.readyState} label=${t.label || "?"}`);
+      });
+      receivers.forEach((r) => {
+        const t = r.track;
+        log(`  remote: enabled=${t.enabled} muted=${t.muted} ready=${t.readyState}`);
+      });
+    } catch (e) {
+      log(`media state error: ${e}`);
+    }
+  }
+
   function attachRemoteAudio(sdh, label) {
     if (!sdh || !sdh.peerConnection) {
       log(`audio attach skipped (${label}): no peerConnection`);
@@ -83,6 +104,16 @@
         }
         if (ev.track) bindRemoteStream(new MediaStream([ev.track]), "track");
       });
+      pc.addEventListener("iceconnectionstatechange", () => {
+        log(`iceConnectionState=${pc.iceConnectionState}`);
+        if (pc.iceConnectionState === "failed" || pc.iceConnectionState === "disconnected") {
+          log("ICE failed — check SOFTPHONE_MEDIA_IP=127.0.0.1 and UDP 10000-10100 published");
+        }
+        logMediaState(pc, "ice");
+      });
+      pc.addEventListener("connectionstatechange", () => {
+        log(`pc.connectionState=${pc.connectionState}`);
+      });
     }
 
     try {
@@ -91,9 +122,23 @@
         if (r.track) stream.addTrack(r.track);
       });
       if (stream.getTracks().length) bindRemoteStream(stream, label);
+      logMediaState(pc, label);
     } catch (e) {
       log(`audio receivers error: ${e}`);
     }
+  }
+
+  async function ensureMicrophone() {
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+      throw new Error("getUserMedia not available (use https or localhost)");
+    }
+    const stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
+    const track = stream.getAudioTracks()[0];
+    if (!track) throw new Error("No microphone track returned");
+    log(`mic granted: ${track.label || "default"} enabled=${track.enabled}`);
+    // Keep the permission warm; SIP.js will open its own track for the call.
+    track.stop();
+    return true;
   }
 
   async function loadConfig() {
@@ -136,6 +181,14 @@
         invitation.reject();
       },
     };
+
+    try {
+      await ensureMicrophone();
+    } catch (e) {
+      log(`mic preflight failed: ${e.message || e}`);
+      setStatus(`Microphone required: ${e.message || e}`, false);
+      throw e;
+    }
 
     await userAgent.start();
     registerer = new Registerer(userAgent);
