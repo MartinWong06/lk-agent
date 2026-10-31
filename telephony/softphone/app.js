@@ -141,12 +141,29 @@
     return true;
   }
 
+  function pageHostIsLoopback() {
+    const h = (window.location.hostname || "").toLowerCase();
+    return h === "localhost" || h === "127.0.0.1" || h === "[::1]";
+  }
+
   async function loadConfig() {
     const res = await fetch("./config.json", { cache: "no-store" });
     config = await res.json();
     destEl.value = config.aiExtension || "1000";
     setStatus(`Ready — ${config.authorizationUser}@${config.domain}`, false);
     log(`config loaded ws=${config.wsServer}`);
+    if (config.preferredPageHost && pageHostIsLoopback()) {
+      log(
+        `WARNING: open http://${config.preferredPageHost}:8088/ instead of localhost ` +
+          "(Docker Desktop WebRTC ICE fails on 127.0.0.1)"
+      );
+      setStatus(`Open http://${config.preferredPageHost}:8088/ for audio`, false);
+    } else if (pageHostIsLoopback()) {
+      log(
+        "WARNING: page is on localhost — set SOFTPHONE_PUBLIC_HOST to your LAN IP " +
+          "and open http://<LAN_IP>:8088/ (see scripts/windows-softphone-env.ps1)"
+      );
+    }
   }
 
   async function register() {

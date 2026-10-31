@@ -1,19 +1,16 @@
-# Local WebRTC softphone on Docker Desktop (Windows/macOS).
+# OPTIONAL overlay for Linux hosts / LiveKit SIP NAT debugging.
 #
-# Bridge-mode Asterisk makes ICE fail: browser 127.0.0.1 ≠ container 127.0.0.1,
-# so calls Establish with micTracks=1 then iceConnectionState=failed / silent audio.
+# Docker Desktop for Windows/macOS does NOT provide real host networking to the
+# Windows/macOS loopback. Using this overlay there often breaks INVITE (30s
+# Terminated) and does NOT fix softphone ICE.
 #
-# This overlay:
-#   - Runs Asterisk on the host network (RTP/ICE use real host 127.0.0.1 + LAN)
-#   - Keeps Kamailio for SIP WebSocket only (host :8080) — does NOT publish :5060
-#     (Asterisk owns host :5060)
-#   - Points Kamailio dispatcher at host.docker.internal
+# For Windows softphone audio, stay on bridge compose and set:
+#   SOFTPHONE_PUBLIC_HOST=<your LAN IP>   e.g. 192.168.1.42
+# then open http://192.168.1.42:8088/ (not localhost).
 #
-# Usage:
+# Linux usage:
 #   docker compose -f docker-compose.yml -f docker-compose.host-asterisk.yml \
 #     up -d --build --force-recreate --scale agent=1
-#   open http://localhost:8088/
-#
 services:
   kamailio:
     ports: !override
@@ -28,5 +25,4 @@ services:
     networks: !reset []
     ports: !reset []
     environment:
-      # Host loopback is correct only when Asterisk uses network_mode: host
       SOFTPHONE_MEDIA_IP: ${SOFTPHONE_MEDIA_IP:-127.0.0.1}

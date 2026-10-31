@@ -46,17 +46,24 @@ uv run --with livekit-api --with python-dotenv python livekit/setup_sip.py
 
 # Softphone UI password/WS URL are rendered from .env at container start
 
-# Windows/macOS Docker Desktop — REQUIRED for softphone audio (host-network Asterisk)
-docker compose -f docker-compose.yml -f docker-compose.host-asterisk.yml \
-  up -d --build --force-recreate --scale agent=1
+# Bridge stack (signaling). Softphone audio on Docker Desktop needs a LAN IP — see below.
+docker compose up -d --build --force-recreate --scale agent=1
 docker compose ps
 ```
 
-Softphone / Kamailio / Asterisk should show **healthy** (or at least **Up**). Then open
-**http://localhost:8088/** → allow mic → **Register** → dial **1000** (AI).
+### Windows Docker Desktop softphone audio (ICE)
 
-> Bridge-only `docker compose up` often yields `Established` + `iceConnectionState=failed`
-> (silent call). Use the `host-asterisk` overlay so browser RTP hits Asterisk on the host.
+`network_mode: host` does **not** fix WebRTC on Docker Desktop Windows. Use your LAN IP:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\scripts\windows-softphone-env.ps1
+# paste the printed lines into .env, then:
+docker compose up -d --force-recreate asterisk softphone kamailio
+```
+
+Open **`http://<LAN_IP>:8088/`** (not localhost) → allow mic → Register → Call AI.
+
+Expect `iceConnectionState=connected`. Using `localhost` makes Chrome gather `127.0.0.1` ICE candidates the Asterisk container cannot reach.
 
 If softphone still crash-loops, confirm `docker compose ps` COMMAND contains
 `/bin/sh -c` (not bare `/docker-entrypoint.sh`), then check
@@ -119,11 +126,13 @@ Optional profile `full-media` includes an rtpengine image for advanced WebRTC br
 - Softphone log `audio attach error: ... sessionDescriptionHandler`: fixed by attaching media via
   `onSessionDescriptionHandler` / `track` events and blocking overlapping Call AI clicks.
   Recreate softphone + hard-refresh. Click **Call AI once**; use Hang up before redialing.
-- Call **Established** but `iceConnectionState=failed` / silent audio (mic granted, remote muted):
-  Asterisk was in Docker bridge — container `127.0.0.1` is not the Windows host. Recreate with
-  the host-asterisk overlay (see Quick start). Expect `iceConnectionState=connected`.
-- Asterisk / LiveKit SIP NAT on Docker Desktop: use `docker-compose.host-asterisk.yml`
-  (Kamailio keeps only `:8080` published so host `:5060` is free for Asterisk).
+- Call **Established** but `iceConnectionState=failed` / silent audio (mic OK): open the softphone
+  via your **LAN IP** (`scripts/windows-softphone-env.ps1`), not localhost, and set
+  `SOFTPHONE_PUBLIC_HOST` / `SOFTPHONE_MEDIA_IP` to that IP. Recreate asterisk+softphone+kamailio.
+- Call **Establishing → Terminated (~30s)** with no Established: INVITE timed out (Kamailio↔Asterisk
+  or Asterisk↔LiveKit). Prefer plain bridge compose on Docker Desktop Windows — avoid
+  `host-asterisk` overlay there. Check `docker compose logs kamailio asterisk --tail 80`.
+- Linux-only host Asterisk overlay: `docker-compose.host-asterisk.yml` (not for Desktop Windows).
 - Softphone cannot register: check Kamailio logs (`docker compose logs kamailio`) and `wsServer` / env-rendered `config.json`
 - `404 No trunk found` from LiveKit: wrong `LIVEKIT_SIP_HOST` (see above) or trunk numbers / `allowed_addresses` mismatch
 - Agent `Connection timeout` to LiveKit from Docker: agents use `network_mode: host` in compose for Cloud WSS
@@ -141,9 +150,8 @@ Optional profile `full-media` includes an rtpengine image for advanced WebRTC br
 - Duplex worker `enterprise-voice` received job, joined room `call-_1000_*`,
   linked `sip_1000`, ran `openai/gpt-live-1`
 - `agent.yaml` drives persona/voice/model without code changes
-- For Cloud SIP behind NAT, use:
-  `docker compose -f docker-compose.yml -f docker-compose.host-asterisk.yml up -d asterisk`
-  (stop Kamailio first — both want host `:5060`)
+- For Cloud SIP + local softphone audio on Docker Desktop, use the host-asterisk overlay
+  (Kamailio WS `:8080` only; Asterisk owns host `:5060` + RTP)
 
 ## Phase 2 (not in this compose)
 

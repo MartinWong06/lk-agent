@@ -108,6 +108,9 @@ services:
       AI_EXTENSION: ${AI_EXTENSION:-1000}
       # Browser reaches Kamailio on the host-mapped port
       SOFTPHONE_WS_SERVER: ${SOFTPHONE_WS_SERVER:-ws://localhost:8080}
+      # LAN IP for Docker Desktop WebRTC (see scripts/windows-softphone-env.ps1)
+      SOFTPHONE_PUBLIC_HOST: ${SOFTPHONE_PUBLIC_HOST:-}
+      SOFTPHONE_MEDIA_IP: ${SOFTPHONE_MEDIA_IP:-127.0.0.1}
     volumes:
       - ./softphone/docker-entrypoint.sh:/docker-entrypoint.sh:ro
     healthcheck:
