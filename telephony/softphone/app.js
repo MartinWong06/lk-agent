@@ -14,6 +14,8 @@
   let userAgent = null;
   let registerer = null;
   let session = null;
+  let callInFlight = false;
+  let registered = false;
 
   function log(msg) {
     const line = `[${new Date().toISOString().slice(11, 19)}] ${msg}`;
@@ -27,9 +29,54 @@
   }
 
   function setRegistered(on) {
+    registered = on;
     btnReg.disabled = on;
     btnUnreg.disabled = !on;
-    btnCall.disabled = !on;
+    btnCall.disabled = !on || callInFlight;
+  }
+
+  function setInCall(on) {
+    callInFlight = on;
+    btnCall.disabled = on || !registered;
+    btnHangup.disabled = !on;
+  }
+
+  function attachRemoteAudio(sdh, label) {
+    if (!sdh || !sdh.peerConnection) {
+      log(`audio attach skipped (${label}): no peerConnection`);
+      return;
+    }
+    const pc = sdh.peerConnection;
+
+    const bindStream = (stream) => {
+      if (!stream) return;
+      remoteAudio.srcObject = stream;
+      remoteAudio.play().catch((e) => log(`audio play blocked: ${e.message || e}`));
+      log(`remote audio attached (${label}) tracks=${stream.getAudioTracks().length}`);
+    };
+
+    // Prefer live track events (tracks may arrive after Established)
+    pc.addEventListener("track", (ev) => {
+      if (ev.streams && ev.streams[0]) {
+        bindStream(ev.streams[0]);
+        return;
+      }
+      if (ev.track) {
+        const stream = new MediaStream([ev.track]);
+        bindStream(stream);
+      }
+    });
+
+    // Also bind any receivers already present
+    try {
+      const stream = new MediaStream();
+      pc.getReceivers().forEach((r) => {
+        if (r.track) stream.addTrack(r.track);
+      });
+      if (stream.getTracks().length) bindStream(stream);
+    } catch (e) {
+      log(`audio receivers error: ${e}`);
+    }
   }
 
   async function loadConfig() {
@@ -91,6 +138,11 @@
   }
 
   async function unregister() {
+    if (session) {
+      try {
+        await hangup();
+      } catch (_) {}
+    }
     if (registerer) await registerer.unregister();
     if (userAgent) await userAgent.stop();
     userAgent = null;
@@ -101,6 +153,11 @@
 
   async function call() {
     if (!userAgent || !window._Inviter) return;
+    if (callInFlight || session) {
+      log("call already in progress — hang up first");
+      return;
+    }
+
     const dest = destEl.value.trim();
     const target = SIP.UserAgent.makeURI(`sip:${dest}@${config.domain}`);
     if (!target) {
@@ -108,49 +165,69 @@
       return;
     }
 
-    session = new window._Inviter(userAgent, target, {
+    const thisSession = new window._Inviter(userAgent, target, {
       sessionDescriptionHandlerOptions: {
         constraints: { audio: true, video: false },
       },
     });
+    session = thisSession;
+    setInCall(true);
 
-    session.stateChange.addListener((state) => {
+    // Attach media as soon as the SDH exists (avoids Established race / null SDH)
+    thisSession.delegate = {
+      onSessionDescriptionHandler(sdh) {
+        log("sessionDescriptionHandler ready");
+        attachRemoteAudio(sdh, "sdh");
+      },
+    };
+
+    thisSession.stateChange.addListener((state) => {
+      // Always use thisSession — never the shared `session` var (Terminated race)
       log(`call state: ${state}`);
-      btnHangup.disabled = state === "Terminated";
       if (state === "Established") {
         setStatus(`In call with ${dest}`, true);
-        try {
-          const pc = session.sessionDescriptionHandler.peerConnection;
-          const receivers = pc.getReceivers();
-          const stream = new MediaStream();
-          receivers.forEach((r) => {
-            if (r.track) stream.addTrack(r.track);
-          });
-          remoteAudio.srcObject = stream;
-        } catch (e) {
-          log(`audio attach error: ${e}`);
-        }
+        const sdh = thisSession.sessionDescriptionHandler;
+        if (sdh) attachRemoteAudio(sdh, "established");
+        else log("Established but SDH not ready yet — waiting for delegate");
       }
       if (state === "Terminated") {
-        setStatus("Registered", true);
-        session = null;
+        if (session === thisSession) {
+          session = null;
+          setInCall(false);
+          setStatus("Registered", true);
+          remoteAudio.srcObject = null;
+        }
       }
     });
 
-    btnHangup.disabled = false;
-    await session.invite();
-    log(`INVITE ${dest}`);
+    try {
+      log(`INVITE ${dest}`);
+      await thisSession.invite();
+    } catch (e) {
+      log(`INVITE failed: ${e.message || e}`);
+      if (session === thisSession) {
+        session = null;
+        setInCall(false);
+      }
+      throw e;
+    }
   }
 
   async function hangup() {
-    if (!session) return;
+    const s = session;
+    if (!s) return;
     try {
-      await session.bye();
+      await s.bye();
     } catch (_) {
-      try { session.cancel(); } catch (__) {}
+      try {
+        s.cancel();
+      } catch (__) {}
     }
-    session = null;
-    btnHangup.disabled = true;
+    if (session === s) {
+      session = null;
+      setInCall(false);
+      remoteAudio.srcObject = null;
+    }
   }
 
   btnReg.addEventListener("click", () => register().catch((e) => {
