@@ -109,6 +109,9 @@ Optional profile `full-media` includes an rtpengine image for advanced WebRTC br
   `docker compose up -d --build --force-recreate --scale agent=1`
   Confirm `docker compose ps` COMMAND contains `/bin/sh -c` (not bare `/docker-entrypoint.sh`).
   Then `docker compose logs softphone kamailio --tail 40`.
+- Softphone status **SIP.js failed to load**: UI needs `vendor/sip-0.21.2.min.js` (bundled in-repo).
+  Do not use jsDelivr `dist/sip.min.js` for 0.21.x — that path 404s. Rebuild softphone after pull:
+  `docker compose up -d --build --force-recreate softphone`, then hard-refresh the browser.
 - Softphone cannot register: check Kamailio logs (`docker compose logs kamailio`) and `wsServer` / env-rendered `config.json`
 - `404 No trunk found` from LiveKit: wrong `LIVEKIT_SIP_HOST` (see above) or trunk numbers / `allowed_addresses` mismatch
 - Agent `Connection timeout` to LiveKit from Docker: agents use `network_mode: host` in compose for Cloud WSS

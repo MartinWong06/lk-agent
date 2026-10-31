@@ -42,7 +42,8 @@
 
   async function register() {
     if (!window.SIP) {
-      setStatus("SIP.js failed to load", false);
+      setStatus("SIP.js failed to load (check /vendor/sip-0.21.2.min.js)", false);
+      log("window.SIP missing — softphone vendor bundle did not load");
       return;
     }
     const { UserAgent, Registerer, Inviter } = SIP;
