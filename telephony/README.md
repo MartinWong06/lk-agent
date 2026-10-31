@@ -46,10 +46,17 @@ uv run --with livekit-api --with python-dotenv python livekit/setup_sip.py
 
 # Softphone UI password/WS URL are rendered from .env at container start
 
-docker compose up -d --build --scale agent=2
+# One agent on Docker Desktop (host networking); scale agents across hosts in prod
+docker compose up -d --build --force-recreate --scale agent=1
+docker compose ps
 ```
 
-Open **http://localhost:8088/** → **Register** → dial **1000** (AI).
+Softphone / Kamailio / Asterisk should show **healthy** (or at least **Up**). Then open
+**http://localhost:8088/** → **Register** → dial **1000** (AI).
+
+If softphone still crash-loops, confirm `docker compose ps` COMMAND contains
+`/bin/sh -c` (not bare `/docker-entrypoint.sh`), then check
+`docker compose logs softphone kamailio --tail 40`.
 
 ## Configuration (no code edits for routine changes)
 
@@ -64,7 +71,7 @@ Open **http://localhost:8088/** → **Register** → dial **1000** (AI).
 After changing `agent.yaml`:
 
 ```bash
-docker compose up -d --force-recreate --scale agent=2 agent
+docker compose up -d --force-recreate --scale agent=1 agent
 ```
 
 ## Ports
@@ -96,10 +103,12 @@ Optional profile `full-media` includes an rtpengine image for advanced WebRTC br
 
 ## Troubleshooting
 
-- Softphone / Kamailio crash-loop with `exec ...entrypoint.sh: no such file or directory`:
-  Windows CRLF line endings broke the Linux shebang. Rebuild after pulling this branch
-  (`docker compose up -d --build --force-recreate softphone kamailio asterisk`).
-  Images strip `\r` at build time; entrypoints also strip host-mounted configs.
+- Softphone / Kamailio crash-loop with `exec ...entrypoint.sh: no such file or directory`
+  or `Restarting (255)` while Asterisk is healthy: Windows CRLF broke the Linux shebang.
+  Compose now launches via `tr -d '\\r' | /bin/sh` so a recreate is enough:
+  `docker compose up -d --build --force-recreate --scale agent=1`
+  Confirm `docker compose ps` COMMAND contains `/bin/sh -c` (not bare `/docker-entrypoint.sh`).
+  Then `docker compose logs softphone kamailio --tail 40`.
 - Softphone cannot register: check Kamailio logs (`docker compose logs kamailio`) and `wsServer` / env-rendered `config.json`
 - `404 No trunk found` from LiveKit: wrong `LIVEKIT_SIP_HOST` (see above) or trunk numbers / `allowed_addresses` mismatch
 - Agent `Connection timeout` to LiveKit from Docker: agents use `network_mode: host` in compose for Cloud WSS

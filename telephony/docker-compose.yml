@@ -3,7 +3,7 @@
 #
 # Usage:
 #   cp .env.example .env   # fill LIVEKIT_* and passwords
-#   docker compose up -d --build
+#   docker compose up -d --build --force-recreate --scale agent=1
 #   open http://localhost:8088/
 
 name: enterprise-voice
@@ -20,6 +20,13 @@ services:
     build:
       context: ./kamailio
     restart: unless-stopped
+    # Strip CR then run host-mounted entrypoint (works with stale images + Windows CRLF)
+    entrypoint:
+      [
+        "/bin/sh",
+        "-c",
+        "tr -d '\\r' < /entrypoint.sh > /tmp/ep.sh && exec /bin/sh /tmp/ep.sh",
+      ]
     ports:
       - "5060:5060/udp"
       - "5060:5060/tcp"
@@ -30,16 +37,18 @@ services:
       SOFTPHONE_USER: ${SOFTPHONE_USER:-1001}
       SOFTPHONE_PASSWORD: ${SOFTPHONE_PASSWORD:-change-me-softphone}
     volumes:
+      - ./kamailio/entrypoint.sh:/entrypoint.sh:ro
       - ./kamailio/kamailio.cfg:/etc/kamailio/kamailio.cfg:ro
       - ./kamailio/dispatcher.list:/etc/kamailio/dispatcher.list.template:ro
     depends_on:
-      - asterisk
+      asterisk:
+        condition: service_healthy
     healthcheck:
       test: ["CMD-SHELL", "pgrep -x kamailio >/dev/null || exit 1"]
       interval: 15s
       timeout: 5s
       retries: 8
-      start_period: 15s
+      start_period: 20s
     networks:
       - voice
 
@@ -60,7 +69,12 @@ services:
     volumes:
       - ./asterisk/conf:/config:ro
       - ./asterisk/entrypoint.sh:/entrypoint.sh:ro
-    entrypoint: ["/bin/sh", "/entrypoint.sh"]
+    entrypoint:
+      [
+        "/bin/sh",
+        "-c",
+        "tr -d '\\r' < /entrypoint.sh > /tmp/ep.sh && exec /bin/sh /tmp/ep.sh",
+      ]
     healthcheck:
       test: ["CMD-SHELL", "asterisk -rx 'core show version' >/dev/null 2>&1 || exit 1"]
       interval: 15s
@@ -77,6 +91,12 @@ services:
     build:
       context: ./softphone
     restart: unless-stopped
+    entrypoint:
+      [
+        "/bin/sh",
+        "-c",
+        "tr -d '\\r' < /docker-entrypoint.sh > /tmp/ep.sh && exec /bin/sh /tmp/ep.sh",
+      ]
     ports:
       - "8088:80"
     environment:
@@ -86,11 +106,14 @@ services:
       AI_EXTENSION: ${AI_EXTENSION:-1000}
       # Browser reaches Kamailio on the host-mapped port
       SOFTPHONE_WS_SERVER: ${SOFTPHONE_WS_SERVER:-ws://localhost:8080}
+    volumes:
+      - ./softphone/docker-entrypoint.sh:/docker-entrypoint.sh:ro
     healthcheck:
       test: ["CMD", "wget", "-qO-", "http://127.0.0.1/"]
       interval: 10s
       timeout: 3s
       retries: 5
+      start_period: 10s
     networks:
       - voice
 
@@ -99,6 +122,7 @@ services:
       context: ../livekit-voice-agent
     restart: unless-stopped
     # Host networking avoids Docker bridge WSS timeouts to LiveKit Cloud in many setups
+    # Do NOT --scale agent>1 on a single Docker Desktop host (port / process flapping).
     network_mode: host
     env_file:
       - .env
@@ -111,8 +135,7 @@ services:
     volumes:
       - ./config/agent.yaml:/config/agent.yaml:ro
     command: ["uv", "run", "agent.py", "start"]
-    # HA: scale workers sharing agent_name — docker compose up --scale agent=2
-    # Note: with network_mode:host, --scale may collide on ports; use multiple hosts in prod.
+    # HA: run extra workers on other hosts (or drop network_mode:host) — not --scale on one Desktop VM.
 
 networks:
   voice:

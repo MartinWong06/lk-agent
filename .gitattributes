@@ -2,9 +2,10 @@
 # (CRLF shebangs fail with: exec ...: no such file or directory)
 *.sh text eol=lf
 **/docker-entrypoint.sh text eol=lf
-
 # SIP / PBX configs mounted or COPY'd into Linux images
 *.cfg text eol=lf
 *.conf text eol=lf
 **/dispatcher.list text eol=lf
 **/conf/*.template text eol=lf
+docker-compose*.yml text eol=lf
+**/Dockerfile text eol=lf
