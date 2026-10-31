@@ -107,7 +107,7 @@
       pc.addEventListener("iceconnectionstatechange", () => {
         log(`iceConnectionState=${pc.iceConnectionState}`);
         if (pc.iceConnectionState === "failed" || pc.iceConnectionState === "disconnected") {
-          log("ICE failed — check SOFTPHONE_MEDIA_IP=127.0.0.1 and UDP 10000-10100 published");
+          log("ICE failed — use docker-compose.host-asterisk.yml (Asterisk network_mode:host)");
         }
         logMediaState(pc, "ice");
       });

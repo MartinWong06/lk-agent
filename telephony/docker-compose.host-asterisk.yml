@@ -1,9 +1,32 @@
-# Optional overlay when Docker bridge SIP to LiveKit Cloud fails (NAT).
-# Usage (stop kamailio first — port 5060 conflict):
-#   docker compose stop kamailio
-#   docker compose -f docker-compose.yml -f docker-compose.host-asterisk.yml up -d asterisk
+# Local WebRTC softphone on Docker Desktop (Windows/macOS).
+#
+# Bridge-mode Asterisk makes ICE fail: browser 127.0.0.1 ≠ container 127.0.0.1,
+# so calls Establish with micTracks=1 then iceConnectionState=failed / silent audio.
+#
+# This overlay:
+#   - Runs Asterisk on the host network (RTP/ICE use real host 127.0.0.1 + LAN)
+#   - Keeps Kamailio for SIP WebSocket only (host :8080) — does NOT publish :5060
+#     (Asterisk owns host :5060)
+#   - Points Kamailio dispatcher at host.docker.internal
+#
+# Usage:
+#   docker compose -f docker-compose.yml -f docker-compose.host-asterisk.yml \
+#     up -d --build --force-recreate --scale agent=1
+#   open http://localhost:8088/
+#
 services:
+  kamailio:
+    ports: !override
+      - "8080:8080"
+    environment:
+      ASTERISK_HOST: host.docker.internal
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+
   asterisk:
     network_mode: host
     networks: !reset []
     ports: !reset []
+    environment:
+      # Host loopback is correct only when Asterisk uses network_mode: host
+      SOFTPHONE_MEDIA_IP: ${SOFTPHONE_MEDIA_IP:-127.0.0.1}

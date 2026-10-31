@@ -46,13 +46,17 @@ uv run --with livekit-api --with python-dotenv python livekit/setup_sip.py
 
 # Softphone UI password/WS URL are rendered from .env at container start
 
-# One agent on Docker Desktop (host networking); scale agents across hosts in prod
-docker compose up -d --build --force-recreate --scale agent=1
+# Windows/macOS Docker Desktop — REQUIRED for softphone audio (host-network Asterisk)
+docker compose -f docker-compose.yml -f docker-compose.host-asterisk.yml \
+  up -d --build --force-recreate --scale agent=1
 docker compose ps
 ```
 
 Softphone / Kamailio / Asterisk should show **healthy** (or at least **Up**). Then open
-**http://localhost:8088/** → **Register** → dial **1000** (AI).
+**http://localhost:8088/** → allow mic → **Register** → dial **1000** (AI).
+
+> Bridge-only `docker compose up` often yields `Established` + `iceConnectionState=failed`
+> (silent call). Use the `host-asterisk` overlay so browser RTP hits Asterisk on the host.
 
 If softphone still crash-loops, confirm `docker compose ps` COMMAND contains
 `/bin/sh -c` (not bare `/docker-entrypoint.sh`), then check
@@ -115,14 +119,14 @@ Optional profile `full-media` includes an rtpengine image for advanced WebRTC br
 - Softphone log `audio attach error: ... sessionDescriptionHandler`: fixed by attaching media via
   `onSessionDescriptionHandler` / `track` events and blocking overlapping Call AI clicks.
   Recreate softphone + hard-refresh. Click **Call AI once**; use Hang up before redialing.
-- Call **Established** but **no mic / no sound**: WebRTC RTP must hit Asterisk on an address the
-  browser can reach. Set `SOFTPHONE_MEDIA_IP=127.0.0.1` for Docker Desktop local UI (default),
-  keep `EXTERNAL_SIP_IP` as your public WAN for LiveKit, recreate Asterisk, allow mic in the
-  browser. Log should show `iceConnectionState=connected` and `micTracks=1`.
+- Call **Established** but `iceConnectionState=failed` / silent audio (mic granted, remote muted):
+  Asterisk was in Docker bridge — container `127.0.0.1` is not the Windows host. Recreate with
+  the host-asterisk overlay (see Quick start). Expect `iceConnectionState=connected`.
+- Asterisk / LiveKit SIP NAT on Docker Desktop: use `docker-compose.host-asterisk.yml`
+  (Kamailio keeps only `:8080` published so host `:5060` is free for Asterisk).
 - Softphone cannot register: check Kamailio logs (`docker compose logs kamailio`) and `wsServer` / env-rendered `config.json`
 - `404 No trunk found` from LiveKit: wrong `LIVEKIT_SIP_HOST` (see above) or trunk numbers / `allowed_addresses` mismatch
 - Agent `Connection timeout` to LiveKit from Docker: agents use `network_mode: host` in compose for Cloud WSS
-- Asterisk cannot reach LiveKit SIP through bridge NAT: try `docker-compose.host-asterisk.yml` (stop Kamailio first — port 5060 clash)
 - Set `EXTERNAL_SIP_IP` to your current public egress IP (it can rotate on cloud VMs)
 - One-way audio: open UDP 10000–10100; for remote browsers, set public IPs / TLS WSS and ICE carefully
 - `setup_sip.py` `Conflicting inbound SIP Trunks`: trunk already exists — skip the script or update
