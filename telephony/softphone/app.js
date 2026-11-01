@@ -290,7 +290,17 @@
 
     try {
       log(`INVITE ${dest}`);
-      await thisSession.invite();
+      await thisSession.invite({
+        requestDelegate: {
+          onAccept: (resp) => log(`INVITE accepted ${resp.message.statusCode}`),
+          onProgress: (resp) => log(`INVITE progress ${resp.message.statusCode}`),
+          onRedirect: (resp) => log(`INVITE redirect ${resp.message.statusCode}`),
+          onReject: (resp) => {
+            const m = resp.message;
+            log(`INVITE rejected ${m.statusCode} ${m.reasonPhrase || ""}`);
+          },
+        },
+      });
     } catch (e) {
       log(`INVITE failed: ${e.message || e}`);
       if (session === thisSession) {

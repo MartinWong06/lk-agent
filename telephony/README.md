@@ -51,19 +51,25 @@ docker compose up -d --build --force-recreate --scale agent=1
 docker compose ps
 ```
 
-### Windows Docker Desktop softphone audio (ICE)
+### Windows Docker Desktop softphone (recommended one-shot)
 
-`network_mode: host` does **not** fix WebRTC on Docker Desktop Windows. Use your LAN IP:
+If Kamailio logs show `dispatch ... -> sip:host.docker.internal:5060`, you are on the
+**host-asterisk overlay** and INVITEs will hang ~30s then Terminated. Reset with:
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File .\scripts\windows-softphone-env.ps1
-# paste the printed lines into .env, then:
-docker compose up -d --force-recreate asterisk softphone kamailio
+powershell -ExecutionPolicy Bypass -File .\scripts\bringup-windows.ps1
 ```
+
+That script:
+1. Writes `SOFTPHONE_PUBLIC_HOST` / `SOFTPHONE_MEDIA_IP` / `SOFTPHONE_WS_SERVER` to `.env`
+2. Runs `docker compose down` **including** the host overlay
+3. Starts **bridge** compose only (`ASTERISK_HOST=asterisk`)
+4. Prints the LAN URL to open
 
 Open **`http://<LAN_IP>:8088/`** (not localhost) → allow mic → Register → Call AI.
 
-Expect `iceConnectionState=connected`. Using `localhost` makes Chrome gather `127.0.0.1` ICE candidates the Asterisk container cannot reach.
+Expect Kamailio: `dispatch sip:1000@voice.local -> sip:asterisk:5060`  
+Expect softphone: `INVITE progress/accepted` then `iceConnectionState=connected`.
 
 If softphone still crash-loops, confirm `docker compose ps` COMMAND contains
 `/bin/sh -c` (not bare `/docker-entrypoint.sh`), then check
