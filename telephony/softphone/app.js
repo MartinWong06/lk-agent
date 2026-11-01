@@ -152,17 +152,19 @@
     destEl.value = config.aiExtension || "1000";
     setStatus(`Ready — ${config.authorizationUser}@${config.domain}`, false);
     log(`config loaded ws=${config.wsServer}`);
-    if (config.preferredPageHost && pageHostIsLoopback()) {
-      log(
-        `WARNING: open http://${config.preferredPageHost}:8088/ instead of localhost ` +
-          "(Docker Desktop WebRTC ICE fails on 127.0.0.1)"
-      );
-      setStatus(`Open http://${config.preferredPageHost}:8088/ for audio`, false);
+    const preferred = config.preferredPageUrl ||
+      (config.preferredPageHost ? `https://${config.preferredPageHost}:8443/` : "");
+    if (preferred && pageHostIsLoopback()) {
+      log(`WARNING: open ${preferred} (HTTPS LAN) — localhost ICE fails in Docker Desktop`);
+      setStatus(`Open ${preferred} for mic+audio`, false);
     } else if (pageHostIsLoopback()) {
       log(
-        "WARNING: page is on localhost — set SOFTPHONE_PUBLIC_HOST to your LAN IP " +
-          "and open http://<LAN_IP>:8088/ (see scripts/windows-softphone-env.ps1)"
+        "WARNING: set SOFTPHONE_PUBLIC_HOST to your LAN IP and open https://<LAN_IP>:8443/ " +
+          "(see scripts/bringup-windows.ps1)"
       );
+    } else if (window.location.protocol === "http:" && config.httpsEnabled) {
+      log(`WARNING: use HTTPS for mic access: ${preferred || "https://<LAN>:8443/"}`);
+      setStatus(`Use HTTPS: ${preferred || "https://<LAN>:8443/"}`, false);
     }
   }
 

@@ -71,7 +71,9 @@ Write-Host "LAN IP: $lan"
 Write-Host "Updating $envFile ..."
 Set-EnvKey $envFile "SOFTPHONE_PUBLIC_HOST" $lan
 Set-EnvKey $envFile "SOFTPHONE_MEDIA_IP" $lan
-Set-EnvKey $envFile "SOFTPHONE_WS_SERVER" "ws://${lan}:8080"
+# WSS via softphone nginx TLS terminator (set by container when PUBLIC_HOST is set)
+Set-EnvKey $envFile "SOFTPHONE_WS_SERVER" "wss://${lan}:8443/ws"
+Set-EnvKey $envFile "SOFTPHONE_ENABLE_HTTPS" "1"
 
 Write-Host "Stopping any previous stack (including host-asterisk overlay)..."
 [void](Invoke-Docker -AllowFail compose -f docker-compose.yml -f docker-compose.host-asterisk.yml down)

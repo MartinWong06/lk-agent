@@ -101,18 +101,23 @@ services:
       ]
     ports:
       - "8088:80"
+      - "8443:443"   # HTTPS UI + WSS→Kamailio (getUserMedia on LAN IP)
     environment:
       SIP_DOMAIN: ${SIP_DOMAIN:-voice.local}
       SOFTPHONE_USER: ${SOFTPHONE_USER:-1001}
       SOFTPHONE_PASSWORD: ${SOFTPHONE_PASSWORD:-change-me-softphone}
       AI_EXTENSION: ${AI_EXTENSION:-1000}
-      # Browser reaches Kamailio on the host-mapped port
-      SOFTPHONE_WS_SERVER: ${SOFTPHONE_WS_SERVER:-ws://localhost:8080}
-      # LAN IP for Docker Desktop WebRTC (see scripts/windows-softphone-env.ps1)
+      # Overridden by entrypoint to wss://HOST:8443/ws when SOFTPHONE_PUBLIC_HOST is set
+      SOFTPHONE_WS_SERVER: ${SOFTPHONE_WS_SERVER:-}
       SOFTPHONE_PUBLIC_HOST: ${SOFTPHONE_PUBLIC_HOST:-}
       SOFTPHONE_MEDIA_IP: ${SOFTPHONE_MEDIA_IP:-127.0.0.1}
+      KAMAILIO_HOST: kamailio
+      SOFTPHONE_ENABLE_HTTPS: ${SOFTPHONE_ENABLE_HTTPS:-}
     volumes:
       - ./softphone/docker-entrypoint.sh:/docker-entrypoint.sh:ro
+      - ./softphone/nginx.conf.template:/etc/nginx/nginx.conf.template:ro
+    depends_on:
+      - kamailio
     healthcheck:
       test: ["CMD", "wget", "-qO-", "http://127.0.0.1/"]
       interval: 10s

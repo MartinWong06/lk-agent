@@ -66,7 +66,11 @@ That script:
 3. Starts **bridge** compose only (`ASTERISK_HOST=asterisk`)
 4. Prints the LAN URL to open
 
-Open **`http://<LAN_IP>:8088/`** (not localhost) → allow mic → Register → Call AI.
+Open **`https://<LAN_IP>:8443/`** (accept the self-signed cert warning) → allow mic → Register → Call AI.
+
+- `http://localhost:8088/` → ICE fails in Docker Desktop  
+- `http://<LAN>:8088/` → browser blocks `getUserMedia` (insecure context)  
+- `https://<LAN>:8443/` → mic works; nginx terminates TLS and proxies WSS → Kamailio  
 
 Expect Kamailio: `dispatch sip:1000@voice.local -> sip:asterisk:5060`  
 Expect softphone: `INVITE progress/accepted` then `iceConnectionState=connected`.
