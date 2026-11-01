@@ -9,6 +9,9 @@ DISPLAY="${SOFTPHONE_DISPLAY_NAME:-Demo Softphone}"
 PUBLIC_HOST="${SOFTPHONE_PUBLIC_HOST:-}"
 KAMAILIO_HOST="${KAMAILIO_HOST:-kamailio}"
 ENABLE_HTTPS="${SOFTPHONE_ENABLE_HTTPS:-}"
+TURN_USER="${TURN_USER:-softphone}"
+TURN_PASSWORD="${TURN_PASSWORD:-change-me-turn}"
+TURN_HOST="${SOFTPHONE_PUBLIC_HOST:-${SOFTPHONE_MEDIA_IP:-127.0.0.1}}"
 
 mkdir -p /etc/nginx/certs
 
@@ -68,7 +71,20 @@ cat > /usr/share/nginx/html/config.json <<EOF
   "mediaHint": "${MEDIA_HINT}",
   "preferredPageHost": "${PUBLIC_HOST}",
   "preferredPageUrl": "${PREFERRED_URL}",
-  "httpsEnabled": $([ "$ENABLE_HTTPS" = "1" ] && echo true || echo false)
+  "httpsEnabled": $([ "$ENABLE_HTTPS" = "1" ] && echo true || echo false),
+  "iceServers": [
+    { "urls": "stun:${TURN_HOST}:3478" },
+    {
+      "urls": "turn:${TURN_HOST}:3478?transport=udp",
+      "username": "${TURN_USER}",
+      "credential": "${TURN_PASSWORD}"
+    },
+    {
+      "urls": "turn:${TURN_HOST}:3478?transport=tcp",
+      "username": "${TURN_USER}",
+      "credential": "${TURN_PASSWORD}"
+    }
+  ]
 }
 EOF
 

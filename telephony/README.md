@@ -141,13 +141,12 @@ Optional profile `full-media` includes an rtpengine image for advanced WebRTC br
   `onSessionDescriptionHandler` / `track` events and blocking overlapping Call AI clicks.
   Recreate softphone + hard-refresh. Click **Call AI once**; use Hang up before redialing.
 - Call **Established**, ICE briefly `connected`, then `disconnected` / `remote: muted=true`:
-  softphone WebRTC never got RTP. Usual causes on Docker Desktop:
-  1. `SOFTPHONE_MEDIA_IP` / `SOFTPHONE_PUBLIC_HOST` must be your **LAN IP** (not `127.0.0.1`)
-  2. Recreate Asterisk after changing them (`docker compose up -d --force-recreate asterisk softphone`)
-  3. Confirm `docker compose exec asterisk grep -E 'media_address|external_media' /etc/asterisk/pjsip.conf`
-     — softphone endpoints show `media_address=<LAN>`; **UDP transport must NOT** list
-     `external_media_address` (WAN). Only LiveKit `transport-tcp` keeps `EXTERNAL_SIP_IP`.
-  4. Allow Windows Firewall UDP **10000–10050**; open `https://<LAN>:8443/` only.
+  softphone WebRTC never got RTP. On Docker Desktop, use the bundled **coturn** relay:
+  1. `SOFTPHONE_MEDIA_IP` / `SOFTPHONE_PUBLIC_HOST` = LAN IP (not `127.0.0.1`)
+  2. `docker compose up -d --build --force-recreate coturn asterisk softphone`
+  3. Softphone log should show `ICE servers configured: 3` and later `ICE pair … relay`
+  4. Asterisk boot log should show `turnaddr=coturn:3478` and **no** `external_media` on UDP
+  5. Allow Windows Firewall UDP **3478**, **49160–49200**, **10000–10050**
   Do **not** use `docker-compose.host-asterisk.yml` on Docker Desktop Windows.
 - Call **Establishing → Terminated (~30s)** with no Established: INVITE timed out (Kamailio↔Asterisk
   or Asterisk↔LiveKit). Prefer plain bridge compose on Docker Desktop Windows — avoid

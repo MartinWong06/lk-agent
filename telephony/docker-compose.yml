@@ -16,6 +16,32 @@ services:
     restart: unless-stopped
     profiles: ["full-media"]
 
+  # TURN/STUN for Docker Desktop softphone WebRTC (direct UDP hairpin is unreliable)
+  coturn:
+    image: coturn/coturn:4.6.2
+    restart: unless-stopped
+    command:
+      - -n
+      - --log-file=stdout
+      - --listening-port=3478
+      - --fingerprint
+      - --lt-cred-mech
+      - --realm=${SIP_DOMAIN:-voice.local}
+      - --user=${TURN_USER:-softphone}:${TURN_PASSWORD:-change-me-turn}
+      - --external-ip=${SOFTPHONE_MEDIA_IP:-127.0.0.1}
+      - --min-port=49160
+      - --max-port=49200
+      - --no-multicast-peers
+      - --no-cli
+      - --no-tls
+      - --no-dtls
+    ports:
+      - "3478:3478"
+      - "3478:3478/udp"
+      - "49160-49200:49160-49200/udp"
+    networks:
+      - voice
+
   kamailio:
     build:
       context: ./kamailio
@@ -68,6 +94,8 @@ services:
       EXTERNAL_SIP_IP: ${EXTERNAL_SIP_IP}
       # Browser-reachable RTP address for local softphone (not the WAN IP)
       SOFTPHONE_MEDIA_IP: ${SOFTPHONE_MEDIA_IP:-127.0.0.1}
+      TURN_USER: ${TURN_USER:-softphone}
+      TURN_PASSWORD: ${TURN_PASSWORD:-change-me-turn}
     volumes:
       - ./asterisk/conf:/config:ro
       - ./asterisk/entrypoint.sh:/entrypoint.sh:ro
@@ -77,6 +105,8 @@ services:
         "-c",
         "tr -d '\\r' < /entrypoint.sh > /tmp/ep.sh && exec /bin/sh /tmp/ep.sh",
       ]
+    depends_on:
+      - coturn
     healthcheck:
       test: ["CMD-SHELL", "asterisk -rx 'core show version' >/dev/null 2>&1 || exit 1"]
       interval: 15s
@@ -111,6 +141,8 @@ services:
       SOFTPHONE_WS_SERVER: ${SOFTPHONE_WS_SERVER:-}
       SOFTPHONE_PUBLIC_HOST: ${SOFTPHONE_PUBLIC_HOST:-}
       SOFTPHONE_MEDIA_IP: ${SOFTPHONE_MEDIA_IP:-127.0.0.1}
+      TURN_USER: ${TURN_USER:-softphone}
+      TURN_PASSWORD: ${TURN_PASSWORD:-change-me-turn}
       KAMAILIO_HOST: kamailio
       SOFTPHONE_ENABLE_HTTPS: ${SOFTPHONE_ENABLE_HTTPS:-}
     volumes:
@@ -118,6 +150,7 @@ services:
       - ./softphone/nginx.conf.template:/etc/nginx/nginx.conf.template:ro
     depends_on:
       - kamailio
+      - coturn
     healthcheck:
       test: ["CMD", "wget", "-qO-", "http://127.0.0.1/"]
       interval: 10s

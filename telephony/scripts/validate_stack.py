@@ -23,8 +23,18 @@ def main() -> int:
     need(ROOT / "kamailio" / "dispatcher.list", "dispatcher list")
     need(ROOT / "asterisk" / "conf" / "pjsip.conf.template", "pjsip template")
     need(ROOT / "asterisk" / "conf" / "extensions.conf.template", "dialplan template")
+    need(ROOT / "asterisk" / "conf" / "rtp.conf.template", "rtp template with TURN")
     need(ROOT / "softphone" / "index.html", "softphone UI")
     need(ROOT / "livekit" / "setup_sip.py", "SIP setup script")
+
+    compose = (ROOT / "docker-compose.yml").read_text(encoding="utf-8")
+    if "coturn:" not in compose:
+        errors.append("docker-compose.yml must define coturn for Docker Desktop WebRTC")
+    pjsip = (ROOT / "asterisk" / "conf" / "pjsip.conf.template").read_text(encoding="utf-8")
+    # UDP transport must not rewrite softphone SDP to WAN
+    udp_block = pjsip.split("[transport-tcp]")[0]
+    if "external_media_address=" in udp_block:
+        errors.append("transport-udp must not set external_media_address (breaks softphone ICE)")
 
     agent_yaml = ROOT / "config" / "agent.yaml"
     if agent_yaml.exists():

@@ -87,6 +87,45 @@
     }
   }
 
+  function logIceStats(pc) {
+    if (!pc || !pc.getStats) return;
+    pc.getStats()
+      .then((stats) => {
+        const byId = {};
+        stats.forEach((r) => {
+          byId[r.id] = r;
+        });
+        stats.forEach((r) => {
+          if (r.type === "candidate-pair" && (r.state === "succeeded" || r.nominated)) {
+            const loc = byId[r.localCandidateId];
+            const rem = byId[r.remoteCandidateId];
+            const ldesc = loc
+              ? `${loc.candidateType}/${loc.protocol} ${loc.address || loc.ip}:${loc.port}`
+              : r.localCandidateId;
+            const rdesc = rem
+              ? `${rem.candidateType}/${rem.protocol} ${rem.address || rem.ip}:${rem.port}`
+              : r.remoteCandidateId;
+            log(`ICE pair ${r.state}: local=${ldesc} remote=${rdesc}`);
+          }
+        });
+      })
+      .catch((e) => log(`getStats error: ${e}`));
+  }
+
+  function logRemoteSdp(sdh) {
+    try {
+      const pc = sdh && sdh.peerConnection;
+      const sdp = pc && pc.remoteDescription && pc.remoteDescription.sdp;
+      if (!sdp) return;
+      const lines = sdp
+        .split(/\r?\n/)
+        .filter((l) => /^(c=|a=candidate:|a=ice-|a=fingerprint|m=audio)/i.test(l));
+      log(`remote SDP media lines:\n${lines.slice(0, 24).join("\n")}`);
+    } catch (e) {
+      log(`remote SDP log error: ${e}`);
+    }
+  }
+
   function attachRemoteAudio(sdh, label) {
     if (!sdh || !sdh.peerConnection) {
       log(`audio attach skipped (${label}): no peerConnection`);
@@ -115,11 +154,16 @@
       });
       pc.addEventListener("iceconnectionstatechange", () => {
         log(`iceConnectionState=${pc.iceConnectionState}`);
+        if (pc.iceConnectionState === "connected" || pc.iceConnectionState === "completed") {
+          logIceStats(pc);
+          logRemoteSdp(sdh);
+        }
         if (pc.iceConnectionState === "failed" || pc.iceConnectionState === "disconnected") {
+          logIceStats(pc);
           log(
-            "ICE failed — on Docker Desktop Windows: set SOFTPHONE_MEDIA_IP/PUBLIC_HOST " +
-              "to your LAN IP, recreate asterisk+softphone, open https://<LAN>:8443/, " +
-              "allow UDP 10000-10050. Do NOT use host-asterisk overlay on Windows."
+            "ICE failed — Docker Desktop: ensure coturn is up, SOFTPHONE_MEDIA_IP=LAN, " +
+              "recreate coturn+asterisk+softphone, open https://<LAN>:8443/, allow UDP " +
+              "10000-10050 and 3478/49160-49200. Do NOT use host-asterisk on Windows."
           );
         }
         logMediaState(pc, "ice");
@@ -199,6 +243,9 @@
       return;
     }
 
+    const iceServers = Array.isArray(config.iceServers) ? config.iceServers : [];
+    log(`ICE servers configured: ${iceServers.length} (TURN/STUN for Docker Desktop)`);
+
     userAgent = new UserAgent({
       uri,
       transportOptions: { server: config.wsServer },
@@ -207,6 +254,7 @@
       displayName: config.displayName || config.authorizationUser,
       sessionDescriptionHandlerFactoryOptions: {
         constraints: { audio: true, video: false },
+        peerConnectionConfiguration: { iceServers },
       },
       logBuiltinEnabled: !!config.traceSip,
     });
@@ -271,9 +319,11 @@
       return;
     }
 
+    const iceServers = Array.isArray(config.iceServers) ? config.iceServers : [];
     const thisSession = new window._Inviter(userAgent, target, {
       sessionDescriptionHandlerOptions: {
         constraints: { audio: true, video: false },
+        peerConnectionConfiguration: { iceServers },
       },
     });
     session = thisSession;

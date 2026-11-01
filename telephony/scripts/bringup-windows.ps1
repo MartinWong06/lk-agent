@@ -73,6 +73,13 @@ Write-Host ('LAN IP: ' + $lan)
 Write-Host ('Updating ' + $envFile + ' ...')
 Set-EnvKey $envFile 'SOFTPHONE_PUBLIC_HOST' $lan
 Set-EnvKey $envFile 'SOFTPHONE_MEDIA_IP' $lan
+# Coturn external-ip must match LAN (used by browser ICE + compose command)
+if (-not (Select-String -Path $envFile -Pattern '^TURN_USER=' -Quiet)) {
+  Add-Content -Path $envFile -Value "TURN_USER=softphone"
+}
+if (-not (Select-String -Path $envFile -Pattern '^TURN_PASSWORD=' -Quiet)) {
+  Add-Content -Path $envFile -Value "TURN_PASSWORD=change-me-turn"
+}
 Set-EnvKey $envFile 'SOFTPHONE_WS_SERVER' ('wss://' + $lan + ':8443/ws')
 Set-EnvKey $envFile 'SOFTPHONE_ENABLE_HTTPS' '1'
 
