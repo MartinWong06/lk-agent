@@ -152,6 +152,12 @@ Optional profile `full-media` includes an rtpengine image for advanced WebRTC br
   `sip:1001@voice.local` from Kamailio: INVITE is identified by Kamailio’s Docker IP via
   `from-kamailio` (trusted). Recreate Asterisk after pull; confirm log no longer shows
   “No matching endpoint found”.
+- Softphone ICE **connected**, agent logs **`user said: Hello`**, but **no speaker audio** /
+  `output_audio_tokens=0`: duplex Inference never generated a reply. On the **Build** plan
+  check Cloud **Billing → LiveKit Inference** credits (~$2.50/mo; GPT-Live ≈ $0.05/min).
+  Agent logs should show `agent_state … -> speaking` and `on_enter: generate_reply completed`
+  (or a clear `generate_reply declined/failed` / “no agent speaking state” error).
+  Telephony `config/agent.yaml` disables MCP/weather by default while bringing up audio.
 - Linux-only host Asterisk overlay: `docker-compose.host-asterisk.yml` (not for Desktop Windows).
 - Softphone cannot register: check Kamailio logs (`docker compose logs kamailio`) and `wsServer` / env-rendered `config.json`
 - `404 No trunk found` from LiveKit: wrong `LIVEKIT_SIP_HOST` (see above) or trunk numbers / `allowed_addresses` mismatch

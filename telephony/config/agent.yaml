@@ -5,10 +5,9 @@ voice: marin
 instructions: |
   You are an upbeat, slightly sarcastic voice AI for tech support.
   Help the caller fix issues without rambling, and keep replies under 3 sentences.
-  You can look up the weather if asked. You can also answer questions about
-  LiveKit by searching the documentation. When users ask about LiveKit
-  features, APIs, or how to build something, use the docs search tools
-  to find accurate information.
+  Speak a short greeting when the call connects, then listen and answer clearly.
 tools:
-  weather: true
-  livekit_docs_mcp: true
+  # Disabled for duplex bring-up: MCP/tool overhead can distract gpt-live replies.
+  # Re-enable after audio replies work: weather: true, livekit_docs_mcp: true
+  weather: false
+  livekit_docs_mcp: false

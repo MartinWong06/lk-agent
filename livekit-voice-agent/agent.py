@@ -68,11 +68,12 @@ def load_agent_config() -> dict[str, Any]:
             "livekit_docs_mcp": bool(tools.get("livekit_docs_mcp", True)),
         }
     logger.info(
-        "Loaded agent config from %s (name=%s model=%s voice=%s)",
+        "Loaded agent config from %s (name=%s model=%s voice=%s tools=%s)",
         path,
         cfg.get("agent_name"),
         cfg.get("model"),
         cfg.get("voice"),
+        cfg.get("tools"),
     )
     return cfg
 
@@ -80,11 +81,58 @@ def load_agent_config() -> dict[str, Any]:
 AGENT_CFG = load_agent_config()
 
 
+@function_tool()
+async def lookup_weather(
+    context: RunContext,
+    location: str,
+) -> dict:
+    """Look up current weather for a location.
+
+    Args:
+        location: City name or location to get weather for.
+    """
+    async with httpx.AsyncClient(timeout=10.0) as client:
+        geo_response = await client.get(
+            "https://geocoding-api.open-meteo.com/v1/search",
+            params={"name": location, "count": 1},
+        )
+        geo_response.raise_for_status()
+        geo_data = geo_response.json()
+
+        if not geo_data.get("results"):
+            raise ToolError(f"Could not find location: {location}")
+
+        place = geo_data["results"][0]
+        lat = place["latitude"]
+        lon = place["longitude"]
+        place_name = place["name"]
+
+        weather_response = await client.get(
+            "https://api.open-meteo.com/v1/forecast",
+            params={
+                "latitude": lat,
+                "longitude": lon,
+                "current": "temperature_2m,weather_code",
+                "temperature_unit": "fahrenheit",
+            },
+        )
+        weather_response.raise_for_status()
+        weather = weather_response.json()
+
+        return {
+            "location": place_name,
+            "temperature_f": weather["current"]["temperature_2m"],
+            "conditions": weather["current"]["weather_code"],
+        }
+
+
 class Assistant(Agent):
     def __init__(self, config: dict[str, Any] | None = None) -> None:
         config = config or AGENT_CFG
         tools: list = []
         tool_flags = config.get("tools") or {}
+        if tool_flags.get("weather", True):
+            tools.append(lookup_weather)
         if tool_flags.get("livekit_docs_mcp", True):
             tools.append(
                 MCPToolset(
@@ -97,60 +145,40 @@ class Assistant(Agent):
             instructions=str(config.get("instructions") or DEFAULT_INSTRUCTIONS),
             tools=tools,
         )
-        self._weather_enabled = bool(tool_flags.get("weather", True))
-
-    @function_tool()
-    async def lookup_weather(
-        self,
-        context: RunContext,
-        location: str,
-    ) -> dict:
-        """Look up current weather for a location.
-
-        Args:
-            location: City name or location to get weather for.
-        """
-        if not self._weather_enabled:
-            raise ToolError("Weather tool is disabled in agent config")
-
-        async with httpx.AsyncClient(timeout=10.0) as client:
-            geo_response = await client.get(
-                "https://geocoding-api.open-meteo.com/v1/search",
-                params={"name": location, "count": 1},
-            )
-            geo_response.raise_for_status()
-            geo_data = geo_response.json()
-
-            if not geo_data.get("results"):
-                raise ToolError(f"Could not find location: {location}")
-
-            place = geo_data["results"][0]
-            lat = place["latitude"]
-            lon = place["longitude"]
-            place_name = place["name"]
-
-            weather_response = await client.get(
-                "https://api.open-meteo.com/v1/forecast",
-                params={
-                    "latitude": lat,
-                    "longitude": lon,
-                    "current": "temperature_2m,weather_code",
-                    "temperature_unit": "fahrenheit",
-                },
-            )
-            weather_response.raise_for_status()
-            weather = weather_response.json()
-
-            return {
-                "location": place_name,
-                "temperature_f": weather["current"]["temperature_2m"],
-                "conditions": weather["current"]["weather_code"],
-            }
+        logger.info(
+            "Assistant tools enabled: weather=%s mcp=%s count=%s",
+            tool_flags.get("weather", True),
+            tool_flags.get("livekit_docs_mcp", True),
+            len(tools),
+        )
 
     async def on_enter(self) -> None:
-        await self.session.generate_reply(
-            instructions="Greet the user briefly and ask how you can help.",
-        )
+        # GPT-Live generate_reply is commentary — model may decline; log clearly.
+        logger.info("on_enter: requesting greeting via generate_reply")
+        try:
+            handle = self.session.generate_reply(
+                instructions="Greet the user briefly and ask how you can help.",
+            )
+            await handle
+            exc = None
+            if hasattr(handle, "exception"):
+                try:
+                    exc = handle.exception()
+                except Exception as probe_err:  # noqa: BLE001 — SpeechHandle API varies
+                    logger.warning("on_enter: could not read SpeechHandle.exception: %s", probe_err)
+            if exc is not None:
+                logger.error(
+                    "on_enter: generate_reply declined/failed: %s "
+                    "(check LiveKit Billing → Inference credits on Build plan)",
+                    exc,
+                )
+            else:
+                logger.info("on_enter: generate_reply completed without exception")
+        except Exception:
+            logger.exception(
+                "on_enter: generate_reply raised "
+                "(check LiveKit Billing → Inference credits / gpt-live session)"
+            )
 
 
 AGENT_NAME = str(AGENT_CFG.get("agent_name") or "enterprise-voice")
@@ -162,6 +190,7 @@ async def entrypoint(ctx: JobContext):
     # Full-duplex speech-to-speech (GPT-Live): model owns turn-taking.
     model = str(AGENT_CFG.get("model") or "openai/gpt-live-1")
     voice = str(AGENT_CFG.get("voice") or "marin")
+    logger.info("Starting session model=%s voice=%s room=%s", model, voice, ctx.room.name)
     session = AgentSession(
         llm=inference.DuplexModel(
             model=model,
@@ -171,6 +200,7 @@ async def entrypoint(ctx: JobContext):
 
     usage_collector = metrics.UsageCollector()
     last_eou_metrics: metrics.EOUMetrics | None = None
+    saw_speaking = False
 
     @session.on("metrics_collected")
     def _on_metrics_collected(ev: MetricsCollectedEvent) -> None:
@@ -183,9 +213,13 @@ async def entrypoint(ctx: JobContext):
 
     @session.on("agent_state_changed")
     def _on_agent_state_changed(ev: AgentStateChangedEvent) -> None:
-        if ev.new_state == "speaking" and last_eou_metrics:
-            elapsed = time.time() - last_eou_metrics.timestamp
-            logger.info("Time to first audio: %.3fs", elapsed)
+        nonlocal saw_speaking
+        logger.info("agent_state %s -> %s", ev.old_state, ev.new_state)
+        if ev.new_state == "speaking":
+            saw_speaking = True
+            if last_eou_metrics:
+                elapsed = time.time() - last_eou_metrics.timestamp
+                logger.info("Time to first audio: %.3fs", elapsed)
 
     @session.on("user_input_transcribed")
     def _on_user_input(ev: UserInputTranscribedEvent) -> None:
@@ -194,11 +228,19 @@ async def entrypoint(ctx: JobContext):
 
     @session.on("error")
     def _on_error(ev) -> None:
-        logger.error("session error: %s", ev.error)
+        err = getattr(ev, "error", ev)
+        logger.error("session error: %s", err)
 
     async def log_usage() -> None:
         summary = usage_collector.get_summary()
         logger.info("Usage summary: %s", summary)
+        if not saw_speaking:
+            logger.error(
+                "Session ended with no agent speaking state. "
+                "If user audio was transcribed but there was no reply, check "
+                "LiveKit Cloud Billing → Inference credits (Build plan ~$2.50/mo). "
+                "GPT-Live (~$0.05/min) produces 0 output tokens when Inference is unavailable."
+            )
 
     ctx.add_shutdown_callback(log_usage)
 
