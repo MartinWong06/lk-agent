@@ -9,7 +9,7 @@ Write-Host "`n=== softphone config (iceServers / ws) ===" -ForegroundColor Cyan
 docker compose exec -T softphone cat /usr/share/nginx/html/config.json 2>$null
 
 Write-Host "`n=== asterisk pjsip media/transport ===" -ForegroundColor Cyan
-docker compose exec -T asterisk grep -E '^\[''|external_media|media_address|^webrtc|^transport|rtpstart|rtpend' /etc/asterisk/pjsip.conf /etc/asterisk/rtp.conf 2>$null
+docker compose exec -T asterisk sh -c "grep -E 'external_media|media_address|^webrtc|rtpstart|rtpend|^\[' /etc/asterisk/pjsip.conf /etc/asterisk/rtp.conf" 2>$null
 
 Write-Host "`n=== recent logs ===" -ForegroundColor Cyan
 docker compose logs --tail 40 asterisk kamailio coturn softphone 2>$null

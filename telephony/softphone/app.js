@@ -161,9 +161,9 @@
         if (pc.iceConnectionState === "failed" || pc.iceConnectionState === "disconnected") {
           logIceStats(pc);
           log(
-            "ICE failed — Docker Desktop: ensure coturn is up, SOFTPHONE_MEDIA_IP=LAN, " +
-              "recreate coturn+asterisk+softphone, open https://<LAN>:8443/, allow UDP " +
-              "10000-10050 and 3478/49160-49200. Do NOT use host-asterisk on Windows."
+            "ICE failed — Docker Desktop: ensure coturn+asterisk+kamailio are Up " +
+              "(not 503/WSS 1006), SOFTPHONE_MEDIA_IP=LAN, open https://<LAN>:8443/, " +
+              "allow UDP 10000-10050 and 3478/49160-49169. See scripts/doctor-windows.ps1"
           );
         }
         logMediaState(pc, "ice");
