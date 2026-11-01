@@ -85,9 +85,9 @@ services:
       start_period: 30s
     networks:
       - voice
-    # RTP media range for Asterisk ↔ LiveKit
+    # RTP media range for Asterisk ↔ softphone/LiveKit (keep in sync with rtp.conf)
     ports:
-      - "10000-10100:10000-10100/udp"
+      - "10000-10050:10000-10050/udp"
 
   softphone:
     build:

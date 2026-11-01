@@ -1,18 +1,23 @@
 ; Generated at container start from env — do not edit the live file by hand.
 ; Softphone registers on Kamailio; Kamailio dispatches INVITE to Asterisk.
+;
+; IMPORTANT (Docker Desktop softphone audio):
+; Do NOT put EXTERNAL_SIP_IP on transport-udp. That rewrites softphone WebRTC SDP
+; to the WAN address and breaks browser↔Asterisk ICE (remote track stays muted).
+; LiveKit uses transport-tcp, which keeps EXTERNAL_SIP_IP for Cloud SIP/RTP.
 
 [global]
 type=global
 ; Prefer IP identify for Kamailio-sourced INVITEs (no Asterisk registration)
 endpoint_identifier_order=ip,username,anonymous
 
+; Local/Kamailio UDP — no external_* so endpoint media_address (LAN) wins in SDP
 [transport-udp]
 type=transport
 protocol=udp
 bind=0.0.0.0:5060
-external_media_address=__EXTERNAL_SIP_IP__
-external_signaling_address=__EXTERNAL_SIP_IP__
 
+; LiveKit SIP trunk — advertise public egress for Cloud Contact/SDP
 [transport-tcp]
 type=transport
 protocol=tcp
@@ -26,19 +31,19 @@ external_signaling_address=__EXTERNAL_SIP_IP__
 [from-kamailio]
 type=endpoint
 context=from-internal
+transport=transport-udp
 disallow=all
 allow=opus,ulaw,alaw
 direct_media=no
 rtp_symmetric=yes
 force_rport=yes
 rewrite_contact=yes
-ice_support=yes
-use_avpf=yes
-rtcp_mux=yes
-media_encryption=dtls
+; webrtc=yes enables ice/dtls/avpf/rtcp_mux + media_use_received_transport
+webrtc=yes
 dtls_auto_generate_cert=yes
 dtls_verify=no
 dtls_setup=actpass
+; Browser-reachable host LAN IP (Docker publishes RTP ports to this address)
 media_address=__SOFTPHONE_MEDIA_IP__
 
 [identify-kamailio]
@@ -55,6 +60,7 @@ match=127.0.0.1/32
 [__SOFTPHONE_USER__]
 type=endpoint
 context=from-internal
+transport=transport-udp
 disallow=all
 allow=opus,ulaw,alaw
 aors=__SOFTPHONE_USER__
@@ -62,10 +68,7 @@ direct_media=no
 rtp_symmetric=yes
 force_rport=yes
 rewrite_contact=yes
-ice_support=yes
-use_avpf=yes
-rtcp_mux=yes
-media_encryption=dtls
+webrtc=yes
 dtls_auto_generate_cert=yes
 dtls_verify=no
 dtls_setup=actpass

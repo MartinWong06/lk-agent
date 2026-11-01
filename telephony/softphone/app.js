@@ -98,6 +98,15 @@
     if (boundPeerConnection !== pc) {
       boundPeerConnection = pc;
       pc.addEventListener("track", (ev) => {
+        if (ev.track) {
+          ev.track.addEventListener("unmute", () => {
+            log(`remote track unmuted (RTP flowing) id=${ev.track.id}`);
+            logMediaState(pc, "unmute");
+          });
+          ev.track.addEventListener("mute", () => {
+            log(`remote track muted (no RTP) id=${ev.track.id}`);
+          });
+        }
         if (ev.streams && ev.streams[0]) {
           bindRemoteStream(ev.streams[0], "track");
           return;
@@ -107,7 +116,11 @@
       pc.addEventListener("iceconnectionstatechange", () => {
         log(`iceConnectionState=${pc.iceConnectionState}`);
         if (pc.iceConnectionState === "failed" || pc.iceConnectionState === "disconnected") {
-          log("ICE failed — use docker-compose.host-asterisk.yml (Asterisk network_mode:host)");
+          log(
+            "ICE failed — on Docker Desktop Windows: set SOFTPHONE_MEDIA_IP/PUBLIC_HOST " +
+              "to your LAN IP, recreate asterisk+softphone, open https://<LAN>:8443/, " +
+              "allow UDP 10000-10050. Do NOT use host-asterisk overlay on Windows."
+          );
         }
         logMediaState(pc, "ice");
       });

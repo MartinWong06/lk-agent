@@ -106,7 +106,7 @@ docker compose up -d --force-recreate --scale agent=1 agent
 | 8088 | Softphone UI |
 | 8080 | Kamailio SIP over WebSocket |
 | 5060 | Kamailio SIP UDP/TCP |
-| 10000–10100/udp | Asterisk RTP |
+| 10000–10050/udp | Asterisk RTP (softphone + LiveKit) |
 
 ## HA layout
 
@@ -140,9 +140,15 @@ Optional profile `full-media` includes an rtpengine image for advanced WebRTC br
 - Softphone log `audio attach error: ... sessionDescriptionHandler`: fixed by attaching media via
   `onSessionDescriptionHandler` / `track` events and blocking overlapping Call AI clicks.
   Recreate softphone + hard-refresh. Click **Call AI once**; use Hang up before redialing.
-- Call **Established** but `iceConnectionState=failed` / silent audio (mic OK): open the softphone
-  via your **LAN IP** (`scripts/windows-softphone-env.ps1`), not localhost, and set
-  `SOFTPHONE_PUBLIC_HOST` / `SOFTPHONE_MEDIA_IP` to that IP. Recreate asterisk+softphone+kamailio.
+- Call **Established**, ICE briefly `connected`, then `disconnected` / `remote: muted=true`:
+  softphone WebRTC never got RTP. Usual causes on Docker Desktop:
+  1. `SOFTPHONE_MEDIA_IP` / `SOFTPHONE_PUBLIC_HOST` must be your **LAN IP** (not `127.0.0.1`)
+  2. Recreate Asterisk after changing them (`docker compose up -d --force-recreate asterisk softphone`)
+  3. Confirm `docker compose exec asterisk grep -E 'media_address|external_media' /etc/asterisk/pjsip.conf`
+     — softphone endpoints show `media_address=<LAN>`; **UDP transport must NOT** list
+     `external_media_address` (WAN). Only LiveKit `transport-tcp` keeps `EXTERNAL_SIP_IP`.
+  4. Allow Windows Firewall UDP **10000–10050**; open `https://<LAN>:8443/` only.
+  Do **not** use `docker-compose.host-asterisk.yml` on Docker Desktop Windows.
 - Call **Establishing → Terminated (~30s)** with no Established: INVITE timed out (Kamailio↔Asterisk
   or Asterisk↔LiveKit). Prefer plain bridge compose on Docker Desktop Windows — avoid
   `host-asterisk` overlay there. Check `docker compose logs kamailio asterisk --tail 80`.
@@ -164,7 +170,7 @@ Optional profile `full-media` includes an rtpengine image for advanced WebRTC br
 - `404 No trunk found` from LiveKit: wrong `LIVEKIT_SIP_HOST` (see above) or trunk numbers / `allowed_addresses` mismatch
 - Agent `Connection timeout` to LiveKit from Docker: agents use `network_mode: host` in compose for Cloud WSS
 - Set `EXTERNAL_SIP_IP` to your current public egress IP (it can rotate on cloud VMs)
-- One-way audio: open UDP 10000–10100; for remote browsers, set public IPs / TLS WSS and ICE carefully
+- One-way audio: open UDP 10000–10050; for remote browsers, set public IPs / TLS WSS and ICE carefully
 - `setup_sip.py` `Conflicting inbound SIP Trunks`: trunk already exists — skip the script or update
   the existing trunk in LiveKit Cloud (do not re-create the same DID)
 - On Windows with `network_mode: host` agents, prefer `--scale agent=1` for the first call test
