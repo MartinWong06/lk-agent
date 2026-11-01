@@ -8,6 +8,20 @@ $ErrorActionPreference = "Stop"
 $Root = Split-Path -Parent $PSScriptRoot
 Set-Location $Root
 
+function Invoke-Docker {
+  param([Parameter(ValueFromRemainingArguments = $true)][string[]]$DockerArgs)
+  # Docker prints progress to stderr; with $ErrorActionPreference=Stop that becomes
+  # a terminating NativeCommandError on Windows PowerShell 5.1.
+  $prev = $ErrorActionPreference
+  $ErrorActionPreference = "Continue"
+  & docker @DockerArgs
+  $code = $LASTEXITCODE
+  $ErrorActionPreference = $prev
+  if ($code -ne 0) {
+    throw "docker $($DockerArgs -join ' ') failed with exit code $code"
+  }
+}
+
 function Get-LanIPv4 {
   $ip = Get-NetIPAddress -AddressFamily IPv4 |
     Where-Object {
@@ -27,8 +41,9 @@ function Set-EnvKey([string]$path, [string]$key, [string]$value) {
   }
   $lines = @(Get-Content $path)
   $found = $false
+  $escaped = [regex]::Escape($key)
   $out = foreach ($line in $lines) {
-    if ($line -match "^(\s*)#?\s*$([regex]::Escape($key))\s*=") {
+    if ($line -match "^\s*#?\s*$escaped\s*=") {
       $found = $true
       "$key=$value"
     } else {
@@ -50,20 +65,28 @@ Set-EnvKey $envFile "SOFTPHONE_MEDIA_IP" $lan
 Set-EnvKey $envFile "SOFTPHONE_WS_SERVER" "ws://${lan}:8080"
 
 Write-Host "Stopping any previous stack (including host-asterisk overlay)..."
-docker compose -f docker-compose.yml -f docker-compose.host-asterisk.yml down 2>$null
-docker compose -f docker-compose.yml down
+try {
+  Invoke-Docker compose -f docker-compose.yml -f docker-compose.host-asterisk.yml down
+} catch {
+  Write-Host "host-asterisk down skipped: $($_.Exception.Message)"
+}
+Invoke-Docker compose -f docker-compose.yml down
 
 Write-Host "Starting BRIDGE stack (ASTERISK_HOST=asterisk, no host overlay)..."
-docker compose -f docker-compose.yml up -d --build --force-recreate --scale agent=1
+Invoke-Docker compose -f docker-compose.yml up -d --build --force-recreate --scale agent=1
 
 Write-Host "Waiting for containers..."
 Start-Sleep -Seconds 8
-docker compose -f docker-compose.yml ps
+Invoke-Docker compose -f docker-compose.yml ps
 
 Write-Host ""
 Write-Host "Kamailio dispatcher target (must be sip:asterisk:5060, NOT host.docker.internal):"
-docker compose -f docker-compose.yml logs kamailio --tail 30 2>$null |
-  Select-String -Pattern "dispatch|ASTERISK|dispatcher|host.docker"
+$prev = $ErrorActionPreference
+$ErrorActionPreference = "Continue"
+$kamLogs = & docker compose -f docker-compose.yml logs kamailio --tail 40 2>&1 |
+  ForEach-Object { "$_" }
+$ErrorActionPreference = $prev
+$kamLogs | Select-String -Pattern "dispatch|ASTERISK_HOST|host.docker" | ForEach-Object { $_.Line }
 
 Write-Host ""
 Write-Host "Open softphone at:  http://${lan}:8088/"
