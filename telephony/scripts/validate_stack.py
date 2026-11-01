@@ -54,8 +54,13 @@ def main() -> int:
             errors.append("agent.py must set rtc_session(agent_name=...)")
         if "load_agent_config" not in src and "AGENT_CONFIG" not in src:
             errors.append("agent.py must load AGENT_CONFIG YAML")
-        if "DuplexModel" not in src:
-            errors.append("agent.py must use DuplexModel for full duplex")
+        if "DuplexModel" not in src or "RealtimeModel" not in src:
+            errors.append(
+                "agent.py must support DuplexModel and RealtimeModel "
+                "(select via agent.yaml model id)"
+            )
+        if "build_speech_llm" not in src:
+            errors.append("agent.py must select speech LLM via build_speech_llm")
 
     if errors:
         print("FAIL")

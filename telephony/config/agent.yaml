@@ -1,13 +1,17 @@
 # Routine AI settings — edit and restart agent workers (no code change required).
+# Inference speech models:
+#   openai/gpt-realtime-2.1-mini  → turn-based RealtimeModel (default; cheaper bring-up)
+#   openai/gpt-realtime-2.1       → turn-based RealtimeModel
+#   openai/gpt-live-1             → full-duplex DuplexModel (only Inference duplex ID)
 agent_name: enterprise-voice
-model: openai/gpt-live-1
+model: openai/gpt-realtime-2.1-mini
 voice: marin
 instructions: |
   You are an upbeat, slightly sarcastic voice AI for tech support.
   Help the caller fix issues without rambling, and keep replies under 3 sentences.
   Speak a short greeting when the call connects, then listen and answer clearly.
 tools:
-  # Disabled for duplex bring-up: MCP/tool overhead can distract gpt-live replies.
-  # Re-enable after audio replies work: weather: true, livekit_docs_mcp: true
+  # Disabled for speech bring-up: MCP/weather can distract first-reply audio.
+  # Re-enable after audible replies work: weather: true, livekit_docs_mcp: true
   weather: false
   livekit_docs_mcp: false

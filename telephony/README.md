@@ -153,10 +153,11 @@ Optional profile `full-media` includes an rtpengine image for advanced WebRTC br
   `from-kamailio` (trusted). Recreate Asterisk after pull; confirm log no longer shows
   “No matching endpoint found”.
 - Softphone ICE **connected**, agent logs **`user said: Hello`**, but **no speaker audio** /
-  `output_audio_tokens=0`: duplex Inference never generated a reply. On the **Build** plan
-  check Cloud **Billing → LiveKit Inference** credits (~$2.50/mo; GPT-Live ≈ $0.05/min).
-  Agent logs should show `agent_state … -> speaking` and `on_enter: generate_reply completed`
-  (or a clear `generate_reply declined/failed` / “no agent speaking state” error).
+  `output_audio_tokens=0`: speech Inference never generated a reply. On the **Build** plan
+  check Cloud **Billing → LiveKit Inference** credits (~$2.50/mo). Default model is
+  turn-based `openai/gpt-realtime-2.1-mini` (`RealtimeModel`); only `openai/gpt-live-1`
+  is full-duplex (`DuplexModel`). Agent logs should show `agent_state … -> speaking` and
+  `on_enter: generate_reply completed` (or a clear decline / “no agent speaking state” error).
   Telephony `config/agent.yaml` disables MCP/weather by default while bringing up audio.
 - Linux-only host Asterisk overlay: `docker-compose.host-asterisk.yml` (not for Desktop Windows).
 - Softphone cannot register: check Kamailio logs (`docker compose logs kamailio`) and `wsServer` / env-rendered `config.json`
@@ -173,9 +174,9 @@ Optional profile `full-media` includes an rtpengine image for advanced WebRTC br
 - Softphone UI healthy (`:8088`), config rendered from `.env`
 - Kamailio healthy (`:5060`, WS `:8080`) when not using host-Asterisk overlay
 - Asterisk → LiveKit SIP (`25v23ne9zzm.sip.livekit.cloud`): `100` / `180` / `200 OK`
-- Duplex worker `enterprise-voice` received job, joined room `call-_1000_*`,
-  linked `sip_1000`, ran `openai/gpt-live-1`
-- `agent.yaml` drives persona/voice/model without code changes
+- Speech worker `enterprise-voice` received job, joined room `call-_1000_*`,
+  linked `sip_1000`; model comes from `agent.yaml` (`openai/gpt-realtime-2.1-mini` default)
+- `agent.yaml` drives persona/voice/model without code changes (`gpt-live-1` → DuplexModel)
 - For Cloud SIP + local softphone audio on Docker Desktop, use the host-asterisk overlay
   (Kamailio WS `:8080` only; Asterisk owns host `:5060` + RTP)
 

@@ -39,13 +39,32 @@ DEFAULT_INSTRUCTIONS = (
     "to find accurate information."
 )
 
+# LiveKit Inference: only openai/gpt-live-* is full-duplex (DuplexModel).
+# openai/gpt-realtime-* and other speech-to-speech IDs use turn-based RealtimeModel.
+DEFAULT_MODEL = "openai/gpt-realtime-2.1-mini"
+DUPLEX_MODEL_PREFIXES = ("openai/gpt-live",)
+
+
+def is_duplex_model(model: str) -> bool:
+    mid = (model or "").strip().lower()
+    return any(mid.startswith(p) for p in DUPLEX_MODEL_PREFIXES)
+
+
+def build_speech_llm(model: str, voice: str):
+    """Pick DuplexModel (full duplex) vs RealtimeModel (turn-based) from model id."""
+    if is_duplex_model(model):
+        logger.info("Using inference.DuplexModel (full duplex) model=%s voice=%s", model, voice)
+        return inference.DuplexModel(model=model, voice=voice)
+    logger.info("Using inference.RealtimeModel (turn-based) model=%s voice=%s", model, voice)
+    return inference.RealtimeModel(model=model, voice=voice)
+
 
 def load_agent_config() -> dict[str, Any]:
     """Load routine settings from AGENT_CONFIG YAML (no code redeploy for persona/voice)."""
     path = os.getenv("AGENT_CONFIG", "").strip()
     cfg: dict[str, Any] = {
         "agent_name": os.getenv("AGENT_NAME", "enterprise-voice"),
-        "model": "openai/gpt-live-1",
+        "model": DEFAULT_MODEL,
         "voice": "marin",
         "instructions": DEFAULT_INSTRUCTIONS,
         "tools": {"weather": True, "livekit_docs_mcp": True},
@@ -153,7 +172,7 @@ class Assistant(Agent):
         )
 
     async def on_enter(self) -> None:
-        # GPT-Live generate_reply is commentary — model may decline; log clearly.
+        # generate_reply is best-effort; duplex may decline commentary — log clearly.
         logger.info("on_enter: requesting greeting via generate_reply")
         try:
             handle = self.session.generate_reply(
@@ -177,7 +196,7 @@ class Assistant(Agent):
         except Exception:
             logger.exception(
                 "on_enter: generate_reply raised "
-                "(check LiveKit Billing → Inference credits / gpt-live session)"
+                "(check LiveKit Billing → Inference credits / realtime session)"
             )
 
 
@@ -187,16 +206,17 @@ server = AgentServer()
 
 @server.rtc_session(agent_name=AGENT_NAME)
 async def entrypoint(ctx: JobContext):
-    # Full-duplex speech-to-speech (GPT-Live): model owns turn-taking.
-    model = str(AGENT_CFG.get("model") or "openai/gpt-live-1")
+    # Speech-to-speech via Inference: DuplexModel for gpt-live-*, else RealtimeModel.
+    model = str(AGENT_CFG.get("model") or DEFAULT_MODEL)
     voice = str(AGENT_CFG.get("voice") or "marin")
-    logger.info("Starting session model=%s voice=%s room=%s", model, voice, ctx.room.name)
-    session = AgentSession(
-        llm=inference.DuplexModel(
-            model=model,
-            voice=voice,
-        ),
+    logger.info(
+        "Starting session model=%s voice=%s duplex=%s room=%s",
+        model,
+        voice,
+        is_duplex_model(model),
+        ctx.room.name,
     )
+    session = AgentSession(llm=build_speech_llm(model, voice))
 
     usage_collector = metrics.UsageCollector()
     last_eou_metrics: metrics.EOUMetrics | None = None
@@ -239,7 +259,7 @@ async def entrypoint(ctx: JobContext):
                 "Session ended with no agent speaking state. "
                 "If user audio was transcribed but there was no reply, check "
                 "LiveKit Cloud Billing → Inference credits (Build plan ~$2.50/mo). "
-                "GPT-Live (~$0.05/min) produces 0 output tokens when Inference is unavailable."
+                "Realtime/duplex speech models produce 0 output when Inference is unavailable."
             )
 
     ctx.add_shutdown_callback(log_usage)
