@@ -9,7 +9,10 @@ $Root = Split-Path -Parent $PSScriptRoot
 Set-Location $Root
 
 function Invoke-Docker {
-  param([Parameter(ValueFromRemainingArguments = $true)][string[]]$DockerArgs)
+  param(
+    [switch]$AllowFail,
+    [Parameter(ValueFromRemainingArguments = $true)][string[]]$DockerArgs
+  )
   # Docker prints progress to stderr; with $ErrorActionPreference=Stop that becomes
   # a terminating NativeCommandError on Windows PowerShell 5.1.
   $prev = $ErrorActionPreference
@@ -18,8 +21,14 @@ function Invoke-Docker {
   $code = $LASTEXITCODE
   $ErrorActionPreference = $prev
   if ($code -ne 0) {
-    throw "docker $($DockerArgs -join ' ') failed with exit code $code"
+    $msg = "docker $($DockerArgs -join ' ') failed with exit code $code"
+    if ($AllowFail) {
+      Write-Host "WARNING: $msg"
+      return $false
+    }
+    throw $msg
   }
+  return $true
 }
 
 function Get-LanIPv4 {
@@ -65,19 +74,31 @@ Set-EnvKey $envFile "SOFTPHONE_MEDIA_IP" $lan
 Set-EnvKey $envFile "SOFTPHONE_WS_SERVER" "ws://${lan}:8080"
 
 Write-Host "Stopping any previous stack (including host-asterisk overlay)..."
-try {
-  Invoke-Docker compose -f docker-compose.yml -f docker-compose.host-asterisk.yml down
-} catch {
-  Write-Host "host-asterisk down skipped: $($_.Exception.Message)"
-}
-Invoke-Docker compose -f docker-compose.yml down
+[void](Invoke-Docker -AllowFail compose -f docker-compose.yml -f docker-compose.host-asterisk.yml down)
+[void](Invoke-Docker compose -f docker-compose.yml down)
 
-Write-Host "Starting BRIDGE stack (ASTERISK_HOST=asterisk, no host overlay)..."
-Invoke-Docker compose -f docker-compose.yml up -d --build --force-recreate --scale agent=1
+# Telephony path first (no ghcr.io dependency). Agent image pull/build is separate —
+# many networks time out on ghcr.io/astral-sh/uv.
+Write-Host "Building/starting softphone + kamailio + asterisk (bridge)..."
+[void](Invoke-Docker compose -f docker-compose.yml up -d --build --force-recreate softphone kamailio asterisk)
+
+Write-Host "Starting agent (reuse local image if present; rebuild only if needed)..."
+$agentOk = Invoke-Docker -AllowFail compose -f docker-compose.yml up -d --no-build --scale agent=1 agent
+if (-not $agentOk) {
+  Write-Host "No usable agent image — trying rebuild from Docker Hub astral/uv base..."
+  $agentOk = Invoke-Docker -AllowFail compose -f docker-compose.yml build agent
+  if ($agentOk) {
+    $agentOk = Invoke-Docker -AllowFail compose -f docker-compose.yml up -d --scale agent=1 agent
+  }
+}
+if (-not $agentOk) {
+  Write-Host "WARNING: agent did not start (registry/network). Softphone SIP path is still up;"
+  Write-Host "         AI audio needs the agent. Retry later or build when Docker Hub/ghcr is reachable."
+}
 
 Write-Host "Waiting for containers..."
 Start-Sleep -Seconds 8
-Invoke-Docker compose -f docker-compose.yml ps
+[void](Invoke-Docker compose -f docker-compose.yml ps)
 
 Write-Host ""
 Write-Host "Kamailio dispatcher target (must be sip:asterisk:5060, NOT host.docker.internal):"
