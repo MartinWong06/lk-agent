@@ -10,4 +10,9 @@ if [ -f "$CFG" ]; then
   CFG=/tmp/kamailio.cfg
 fi
 tr -d '\r' < "$TEMPLATE" | sed "s/__ASTERISK_HOST__/${ASTERISK_HOST}/g" > /tmp/dispatcher.list
+echo "Kamailio dispatcher ASTERISK_HOST=${ASTERISK_HOST} (expect 'asterisk' on Docker Desktop bridge)"
+if [ "$ASTERISK_HOST" = "host.docker.internal" ]; then
+  echo "WARNING: ASTERISK_HOST=host.docker.internal usually breaks INVITE on Docker Desktop Windows."
+  echo "         Use: docker compose -f docker-compose.yml up   (no host-asterisk overlay)"
+fi
 exec kamailio -DD -E -f "$CFG"
