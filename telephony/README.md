@@ -146,6 +146,9 @@ Optional profile `full-media` includes an rtpengine image for advanced WebRTC br
 - Call **Establishing → Terminated (~30s)** with no Established: INVITE timed out (Kamailio↔Asterisk
   or Asterisk↔LiveKit). Prefer plain bridge compose on Docker Desktop Windows — avoid
   `host-asterisk` overlay there. Check `docker compose logs kamailio asterisk --tail 80`.
+- Softphone **`INVITE rejected 488 Not Acceptable Here`**: Asterisk rejected WebRTC SDP.
+  Recreate Asterisk after pulling (softphone endpoint uses `webrtc=yes`). Check
+  `docker compose logs asterisk --tail 100` for SDP / DTLS errors.
 - Linux-only host Asterisk overlay: `docker-compose.host-asterisk.yml` (not for Desktop Windows).
 - Softphone cannot register: check Kamailio logs (`docker compose logs kamailio`) and `wsServer` / env-rendered `config.json`
 - `404 No trunk found` from LiveKit: wrong `LIVEKIT_SIP_HOST` (see above) or trunk numbers / `allowed_addresses` mismatch
