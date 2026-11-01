@@ -183,8 +183,8 @@ Optional profile `full-media` includes an rtpengine image for advanced WebRTC br
 - Speech worker `enterprise-voice` received job, joined room `call-_1000_*`,
   linked `sip_1000`; model comes from `agent.yaml` (`openai/gpt-realtime-2.1-mini` default)
 - `agent.yaml` drives persona/voice/model without code changes (`gpt-live-1` → DuplexModel)
-- For Cloud SIP + local softphone audio on Docker Desktop, use the host-asterisk overlay
-  (Kamailio WS `:8080` only; Asterisk owns host `:5060` + RTP)
+- For Cloud SIP + local softphone audio on Docker Desktop, use bridge compose with
+  `SOFTPHONE_MEDIA_IP`/`SOFTPHONE_PUBLIC_HOST` set to the LAN IP (see bringup-windows.ps1)
 
 ## Phase 2 (not in this compose)
 

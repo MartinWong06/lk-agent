@@ -9,6 +9,6 @@ RUN find /config -type f -exec sed -i 's/\r$//' {} + \
     && sed -i 's/\r$//' /entrypoint.sh \
     && chmod +x /entrypoint.sh
 
-EXPOSE 5060/udp 5060/tcp 10000-10100/udp
+EXPOSE 5060/udp 5060/tcp 10000-10050/udp
 
 ENTRYPOINT ["/bin/sh", "/entrypoint.sh"]
