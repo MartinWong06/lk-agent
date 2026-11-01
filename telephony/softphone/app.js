@@ -130,7 +130,11 @@
 
   async function ensureMicrophone() {
     if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
-      throw new Error("getUserMedia not available (use https or localhost)");
+      const hint = (config && config.preferredPageUrl) || "https://<LAN_IP>:8443/";
+      throw new Error(
+        `getUserMedia blocked on insecure HTTP LAN — open ${hint} ` +
+          "(accept the self-signed cert warning), not http://..."
+      );
     }
     const stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
     const track = stream.getAudioTracks()[0];

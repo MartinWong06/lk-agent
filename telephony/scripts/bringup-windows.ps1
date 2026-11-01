@@ -112,6 +112,9 @@ $ErrorActionPreference = $prev
 $kamLogs | Select-String -Pattern "dispatch|ASTERISK_HOST|host.docker" | ForEach-Object { $_.Line }
 
 Write-Host ""
-Write-Host "Open softphone at:  http://${lan}:8088/"
-Write-Host "Do NOT use http://localhost:8088/ (ICE will fail)."
-Write-Host "Register -> Call AI once. Expect INVITE progress/accepted then iceConnectionState=connected."
+Write-Host "Open softphone at:  https://${lan}:8443/"
+Write-Host "  1) Accept the self-signed certificate warning (Advanced -> Proceed)"
+Write-Host "  2) Allow microphone"
+Write-Host "  3) Register -> Call AI once"
+Write-Host "Do NOT use http://localhost:8088/ (ICE fails) or plain http://LAN:8088/ (mic blocked)."
+Write-Host "Expect INVITE progress/accepted then iceConnectionState=connected."
