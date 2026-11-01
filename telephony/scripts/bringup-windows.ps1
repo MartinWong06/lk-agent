@@ -13,7 +13,7 @@ Set-Location $Root
 function Invoke-Docker {
   param(
     [switch]$AllowFail,
-    [Parameter(ValueFromRemainingArguments = $true)][string[]]$DockerArgs
+    [Parameter(Mandatory = $true)][string[]]$DockerArgs
   )
   # Docker prints progress to stderr; with ErrorActionPreference=Stop that becomes
   # a terminating NativeCommandError on Windows PowerShell 5.1.
@@ -64,7 +64,6 @@ function Set-EnvKey([string]$path, [string]$key, [string]$value) {
   if (-not $found) {
     $out += ($key + '=' + $value)
   }
-  # UTF8 no BOM can confuse PS 5.1; use default/ASCII-friendly content
   Set-Content -Path $path -Value $out -Encoding ASCII
 }
 
@@ -78,19 +77,19 @@ Set-EnvKey $envFile 'SOFTPHONE_WS_SERVER' ('wss://' + $lan + ':8443/ws')
 Set-EnvKey $envFile 'SOFTPHONE_ENABLE_HTTPS' '1'
 
 Write-Host 'Stopping any previous stack (including host-asterisk overlay)...'
-[void](Invoke-Docker -AllowFail compose -f docker-compose.yml -f docker-compose.host-asterisk.yml down)
-[void](Invoke-Docker compose -f docker-compose.yml down)
+[void](Invoke-Docker -AllowFail -DockerArgs @('compose','-f','docker-compose.yml','-f','docker-compose.host-asterisk.yml','down'))
+[void](Invoke-Docker -DockerArgs @('compose','-f','docker-compose.yml','down'))
 
 Write-Host 'Building/starting softphone + kamailio + asterisk (bridge)...'
-[void](Invoke-Docker compose -f docker-compose.yml up -d --build --force-recreate softphone kamailio asterisk)
+[void](Invoke-Docker -DockerArgs @('compose','-f','docker-compose.yml','up','-d','--build','--force-recreate','softphone','kamailio','asterisk'))
 
 Write-Host 'Starting agent (reuse local image if present; rebuild only if needed)...'
-$agentOk = Invoke-Docker -AllowFail compose -f docker-compose.yml up -d --no-build --scale agent=1 agent
+$agentOk = Invoke-Docker -AllowFail -DockerArgs @('compose','-f','docker-compose.yml','up','-d','--no-build','--scale','agent=1','agent')
 if (-not $agentOk) {
   Write-Host 'No usable agent image - trying rebuild from Docker Hub astral/uv base...'
-  $agentOk = Invoke-Docker -AllowFail compose -f docker-compose.yml build agent
+  $agentOk = Invoke-Docker -AllowFail -DockerArgs @('compose','-f','docker-compose.yml','build','agent')
   if ($agentOk) {
-    $agentOk = Invoke-Docker -AllowFail compose -f docker-compose.yml up -d --scale agent=1 agent
+    $agentOk = Invoke-Docker -AllowFail -DockerArgs @('compose','-f','docker-compose.yml','up','-d','--scale','agent=1','agent')
   }
 }
 if (-not $agentOk) {
@@ -100,13 +99,13 @@ if (-not $agentOk) {
 
 Write-Host 'Waiting for containers...'
 Start-Sleep -Seconds 8
-[void](Invoke-Docker compose -f docker-compose.yml ps)
+[void](Invoke-Docker -DockerArgs @('compose','-f','docker-compose.yml','ps'))
 
 Write-Host ''
 Write-Host 'Kamailio dispatcher target (must be sip:asterisk:5060, NOT host.docker.internal):'
 $prev = $ErrorActionPreference
 $ErrorActionPreference = 'Continue'
-$kamLogs = & docker compose -f docker-compose.yml logs kamailio --tail 40 2>&1 |
+$kamLogs = & docker @('compose','-f','docker-compose.yml','logs','kamailio','--tail','40') 2>&1 |
   ForEach-Object { "$_" }
 $ErrorActionPreference = $prev
 $kamLogs | Select-String -Pattern 'dispatch|ASTERISK_HOST|host.docker' | ForEach-Object { $_.Line }
