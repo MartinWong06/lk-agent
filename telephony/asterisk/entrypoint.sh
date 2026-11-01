@@ -12,9 +12,6 @@ LIVEKIT_DID="${LIVEKIT_DID:-+15555550100}"
 EXTERNAL_SIP_IP="${EXTERNAL_SIP_IP:-}"
 # IP the BROWSER uses to reach Asterisk RTP (Docker Desktop local UI → 127.0.0.1)
 SOFTPHONE_MEDIA_IP="${SOFTPHONE_MEDIA_IP:-127.0.0.1}"
-TURN_USER="${TURN_USER:-softphone}"
-TURN_PASSWORD="${TURN_PASSWORD:-change-me-turn}"
-
 if [ -z "$LIVEKIT_SIP_HOST" ]; then
   echo "WARNING: LIVEKIT_SIP_HOST is empty — AI dial to LiveKit will fail until set."
   LIVEKIT_SIP_HOST="sip.invalid"
@@ -25,7 +22,7 @@ if [ -z "$EXTERNAL_SIP_IP" ]; then
   echo "WARNING: EXTERNAL_SIP_IP unset — using ${EXTERNAL_SIP_IP}"
 fi
 
-echo "Softphone WebRTC media_address=${SOFTPHONE_MEDIA_IP} (LiveKit external=${EXTERNAL_SIP_IP}, TURN user=${TURN_USER})"
+echo "Softphone WebRTC media_address=${SOFTPHONE_MEDIA_IP} (LiveKit external=${EXTERNAL_SIP_IP})"
 
 # Render configs from templates (strip CRLF from Windows bind mounts)
 render() {
@@ -40,8 +37,6 @@ render() {
     -e "s|__LIVEKIT_DID__|${LIVEKIT_DID}|g" \
     -e "s|__EXTERNAL_SIP_IP__|${EXTERNAL_SIP_IP}|g" \
     -e "s|__SOFTPHONE_MEDIA_IP__|${SOFTPHONE_MEDIA_IP}|g" \
-    -e "s|__TURN_USER__|${TURN_USER}|g" \
-    -e "s|__TURN_PASSWORD__|${TURN_PASSWORD}|g" \
     > "$2"
 }
 
@@ -59,8 +54,8 @@ fi
 # Show WebRTC-critical lines at boot (helps Docker Desktop bring-up)
 echo "----- pjsip transport/media (expect: no external_media on UDP) -----"
 grep -E '^\[|external_media|media_address|^webrtc|^transport' /etc/asterisk/pjsip.conf || true
-echo "----- rtp turn/stun -----"
-grep -E 'turn|stun|rtpstart|rtpend' /etc/asterisk/rtp.conf || true
+echo "----- rtp range -----"
+grep -E 'rtpstart|rtpend|icesupport|stun|turn' /etc/asterisk/rtp.conf || true
 echo "---------------------------------------------------------------"
 
 # Prefer stock logger if present

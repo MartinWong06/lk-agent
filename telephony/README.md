@@ -145,8 +145,11 @@ Optional profile `full-media` includes an rtpengine image for advanced WebRTC br
   1. `SOFTPHONE_MEDIA_IP` / `SOFTPHONE_PUBLIC_HOST` = LAN IP (not `127.0.0.1`)
   2. `docker compose up -d --build --force-recreate coturn asterisk softphone`
   3. Softphone log should show `ICE servers configured: 3` and later `ICE pair … relay`
-  4. Asterisk boot log should show `turnaddr=coturn:3478` and **no** `external_media` on UDP
-  5. Allow Windows Firewall UDP **3478**, **49160–49200**, **10000–10050**
+  4. Asterisk boot log: **no** `external_media` on UDP; `media_address=<LAN>`
+  5. `docker compose ps` — `asterisk`/`kamailio`/`coturn`/`softphone` all Up (not Restarting)
+  6. Allow Windows Firewall UDP **3478**, **49160–49169**, **10000–10050**
+  If you see softphone `WSS 1006` / INVITE `503`/`408`: Kamailio/Asterisk are down — run
+  `docker compose ps` and `docker compose logs asterisk kamailio coturn --tail 80`.
   Do **not** use `docker-compose.host-asterisk.yml` on Docker Desktop Windows.
 - Call **Establishing → Terminated (~30s)** with no Established: INVITE timed out (Kamailio↔Asterisk
   or Asterisk↔LiveKit). Prefer plain bridge compose on Docker Desktop Windows — avoid

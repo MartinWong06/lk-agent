@@ -16,7 +16,8 @@ services:
     restart: unless-stopped
     profiles: ["full-media"]
 
-  # TURN/STUN for Docker Desktop softphone WebRTC (direct UDP hairpin is unreliable)
+  # Browser-side TURN/STUN for Docker Desktop WebRTC (keep relay range SMALL —
+  # large UDP publish ranges make Desktop recreate flaky → Kamailio 503 / WSS 1006)
   coturn:
     image: coturn/coturn:4.6.2
     restart: unless-stopped
@@ -30,17 +31,25 @@ services:
       - --user=${TURN_USER:-softphone}:${TURN_PASSWORD:-change-me-turn}
       - --external-ip=${SOFTPHONE_MEDIA_IP:-127.0.0.1}
       - --min-port=49160
-      - --max-port=49200
+      - --max-port=49169
       - --no-multicast-peers
       - --no-cli
       - --no-tls
       - --no-dtls
+      - --listening-ip=0.0.0.0
+      - --relay-ip=0.0.0.0
     ports:
-      - "3478:3478"
+      - "3478:3478/tcp"
       - "3478:3478/udp"
-      - "49160-49200:49160-49200/udp"
+      - "49160-49169:49160-49169/udp"
     networks:
       - voice
+    healthcheck:
+      test: ["CMD-SHELL", "ps -o args= 1 | grep -q turnserver || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
 
   kamailio:
     build:
@@ -94,8 +103,6 @@ services:
       EXTERNAL_SIP_IP: ${EXTERNAL_SIP_IP}
       # Browser-reachable RTP address for local softphone (not the WAN IP)
       SOFTPHONE_MEDIA_IP: ${SOFTPHONE_MEDIA_IP:-127.0.0.1}
-      TURN_USER: ${TURN_USER:-softphone}
-      TURN_PASSWORD: ${TURN_PASSWORD:-change-me-turn}
     volumes:
       - ./asterisk/conf:/config:ro
       - ./asterisk/entrypoint.sh:/entrypoint.sh:ro
@@ -105,8 +112,7 @@ services:
         "-c",
         "tr -d '\\r' < /entrypoint.sh > /tmp/ep.sh && exec /bin/sh /tmp/ep.sh",
       ]
-    depends_on:
-      - coturn
+    # Asterisk must stay up even if coturn is slow — SIP 503/WSS 1006 when Asterisk is down
     healthcheck:
       test: ["CMD-SHELL", "asterisk -rx 'core show version' >/dev/null 2>&1 || exit 1"]
       interval: 15s
@@ -149,8 +155,10 @@ services:
       - ./softphone/docker-entrypoint.sh:/docker-entrypoint.sh:ro
       - ./softphone/nginx.conf.template:/etc/nginx/nginx.conf.template:ro
     depends_on:
-      - kamailio
-      - coturn
+      kamailio:
+        condition: service_healthy
+      coturn:
+        condition: service_started
     healthcheck:
       test: ["CMD", "wget", "-qO-", "http://127.0.0.1/"]
       interval: 10s
