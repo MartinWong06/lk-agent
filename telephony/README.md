@@ -71,6 +71,10 @@ Open **`http://<LAN_IP>:8088/`** (not localhost) → allow mic → Register → 
 Expect Kamailio: `dispatch sip:1000@voice.local -> sip:asterisk:5060`  
 Expect softphone: `INVITE progress/accepted` then `iceConnectionState=connected`.
 
+If `ghcr.io` times out while building the agent, the script still starts softphone/Kamailio/Asterisk
+and retries the agent from Docker Hub (`astral/uv`). You can also rebuild just the agent later:
+`docker compose build agent && docker compose up -d --scale agent=1 agent`.
+
 If softphone still crash-loops, confirm `docker compose ps` COMMAND contains
 `/bin/sh -c` (not bare `/docker-entrypoint.sh`), then check
 `docker compose logs softphone kamailio --tail 40`.
