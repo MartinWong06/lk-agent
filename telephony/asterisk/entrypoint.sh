@@ -24,6 +24,20 @@ fi
 
 echo "Softphone WebRTC media_address=${SOFTPHONE_MEDIA_IP} (LiveKit external=${EXTERNAL_SIP_IP})"
 
+# Advertise SOFTPHONE_MEDIA_IP alongside each container IPv4 in ICE host candidates.
+# include_local_address is required: without the real local candidate pjnath has no
+# usable base address, never sends its own checks, and DTLS never starts.
+ICE_HOST_CANDIDATES=""
+for ip in $(hostname -I 2>/dev/null); do
+  case "$ip" in
+    *:*|127.*|"$SOFTPHONE_MEDIA_IP") continue ;;
+  esac
+  ICE_HOST_CANDIDATES="${ICE_HOST_CANDIDATES}${ip} => ${SOFTPHONE_MEDIA_IP},include_local_address\\n"
+done
+if [ -z "$ICE_HOST_CANDIDATES" ]; then
+  ICE_HOST_CANDIDATES="; no container IP to remap (host networking?)"
+fi
+
 # Render configs from templates (strip CRLF from Windows bind mounts)
 render() {
   tr -d '\r' < "$1" | sed \
@@ -37,6 +51,7 @@ render() {
     -e "s|__LIVEKIT_DID__|${LIVEKIT_DID}|g" \
     -e "s|__EXTERNAL_SIP_IP__|${EXTERNAL_SIP_IP}|g" \
     -e "s|__SOFTPHONE_MEDIA_IP__|${SOFTPHONE_MEDIA_IP}|g" \
+    -e "s|__ICE_HOST_CANDIDATES__|${ICE_HOST_CANDIDATES}|g" \
     > "$2"
 }
 
@@ -55,8 +70,10 @@ fi
 echo "----- pjsip transport/media (expect: no external_media on UDP) -----"
 grep -E '^\[|external_media|media_address|^webrtc|^transport' /etc/asterisk/pjsip.conf || true
 echo "----- rtp range -----"
-grep -E 'rtpstart|rtpend|icesupport|stun|turn' /etc/asterisk/rtp.conf || true
+grep -E 'rtpstart|rtpend|icesupport|stun|turn|=>' /etc/asterisk/rtp.conf || true
 echo "---------------------------------------------------------------"
+
+mkdir -p /var/log/asterisk/cdr-csv /var/log/asterisk/cdr-custom
 
 # Prefer stock logger if present
 if [ -f /etc/asterisk/logger.conf ]; then

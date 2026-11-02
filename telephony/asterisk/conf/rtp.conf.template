@@ -1,11 +1,15 @@
 [general]
-; Narrow range for Docker Desktop UDP publish reliability
+; Narrow range for Docker Desktop UDP publish reliability (must match compose ports)
 rtpstart=10000
 rtpend=10050
 icesupport=yes
 strictrtp=no
 bindaddr=0.0.0.0
-; Do NOT point Asterisk stun/turn at coturn here.
-; Unreachable STUN at boot / call time has caused flaky INVITE (408/503) on Desktop.
-; Softphone SIP.js uses coturn iceServers; Asterisk answers browser relay candidates
-; with media_address=SOFTPHONE_MEDIA_IP + webrtc/rtp_symmetric.
+; No stunaddr/turnaddr: unreachable STUN at boot/call time stalls PJSIP (408/503),
+; and the [ice_host_candidates] override below must not be mixed with STUN/TURN.
+
+; Browser WebRTC (Docker bridge): Asterisk only sees its container IP (172.x), which
+; a browser on the host/LAN cannot reach. The entrypoint maps it to SOFTPHONE_MEDIA_IP
+; so ICE targets the published RTP ports (10000-10050/udp) instead.
+[ice_host_candidates]
+__ICE_HOST_CANDIDATES__
