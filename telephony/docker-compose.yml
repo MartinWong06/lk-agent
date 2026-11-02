@@ -16,11 +16,13 @@ services:
     restart: unless-stopped
     profiles: ["full-media"]
 
-  # Browser-side TURN/STUN for Docker Desktop WebRTC (keep relay range SMALL —
-  # large UDP publish ranges make Desktop recreate flaky → Kamailio 503 / WSS 1006)
+  # Optional browser TURN relay (only for remote/NAT'd browsers). Not needed on the
+  # same LAN: Asterisk advertises SOFTPHONE_MEDIA_IP via rtp.conf ice_host_candidates.
+  # Enable with:  SOFTPHONE_TURN=1 docker compose --profile turn up -d
   coturn:
     image: coturn/coturn:4.6.2
     restart: unless-stopped
+    profiles: ["turn"]
     command:
       - -n
       - --log-file=stdout
@@ -45,7 +47,7 @@ services:
     networks:
       - voice
     healthcheck:
-      test: ["CMD-SHELL", "ps -o args= 1 | grep -q turnserver || exit 1"]
+      test: ["CMD-SHELL", "grep -q turnserver /proc/1/cmdline || exit 1"]
       interval: 15s
       timeout: 5s
       retries: 5
@@ -78,8 +80,9 @@ services:
     depends_on:
       asterisk:
         condition: service_healthy
+    # Probe the WS listener itself: a live process with a dead TCP stack gives WSS 1006
     healthcheck:
-      test: ["CMD-SHELL", "pgrep -x kamailio >/dev/null || exit 1"]
+      test: ["CMD-SHELL", "pgrep -x kamailio >/dev/null && bash -c ':</dev/tcp/127.0.0.1/8080' || exit 1"]
       interval: 15s
       timeout: 5s
       retries: 8
@@ -112,9 +115,9 @@ services:
         "-c",
         "tr -d '\\r' < /entrypoint.sh > /tmp/ep.sh && exec /bin/sh /tmp/ep.sh",
       ]
-    # Asterisk must stay up even if coturn is slow — SIP 503/WSS 1006 when Asterisk is down
+    # Healthy only once PJSIP has loaded the Kamailio endpoint (else Kamailio dispatch → 408/503)
     healthcheck:
-      test: ["CMD-SHELL", "asterisk -rx 'core show version' >/dev/null 2>&1 || exit 1"]
+      test: ["CMD-SHELL", "asterisk -rx 'pjsip show endpoint from-kamailio' 2>/dev/null | grep -q 'Endpoint:  from-kamailio' || exit 1"]
       interval: 15s
       timeout: 5s
       retries: 10
@@ -147,6 +150,7 @@ services:
       SOFTPHONE_WS_SERVER: ${SOFTPHONE_WS_SERVER:-}
       SOFTPHONE_PUBLIC_HOST: ${SOFTPHONE_PUBLIC_HOST:-}
       SOFTPHONE_MEDIA_IP: ${SOFTPHONE_MEDIA_IP:-127.0.0.1}
+      SOFTPHONE_TURN: ${SOFTPHONE_TURN:-0}
       TURN_USER: ${TURN_USER:-softphone}
       TURN_PASSWORD: ${TURN_PASSWORD:-change-me-turn}
       KAMAILIO_HOST: kamailio
@@ -157,8 +161,6 @@ services:
     depends_on:
       kamailio:
         condition: service_healthy
-      coturn:
-        condition: service_started
     healthcheck:
       test: ["CMD", "wget", "-qO-", "http://127.0.0.1/"]
       interval: 10s

@@ -161,9 +161,9 @@
         if (pc.iceConnectionState === "failed" || pc.iceConnectionState === "disconnected") {
           logIceStats(pc);
           log(
-            "ICE failed — Docker Desktop: ensure coturn+asterisk+kamailio are Up " +
-              "(not 503/WSS 1006), SOFTPHONE_MEDIA_IP=LAN, open https://<LAN>:8443/, " +
-              "allow UDP 10000-10050 and 3478/49160-49169. See scripts/doctor-windows.ps1"
+            `ICE ${pc.iceConnectionState} — check SOFTPHONE_MEDIA_IP=<this PC's LAN IP> ` +
+              "(Asterisk logs 'ice_host_candidates'), open https://<LAN>:8443/, and allow " +
+              "UDP 10000-10050 in Windows Firewall. Run scripts/doctor-windows.ps1"
           );
         }
         logMediaState(pc, "ice");
@@ -244,7 +244,7 @@
     }
 
     const iceServers = Array.isArray(config.iceServers) ? config.iceServers : [];
-    log(`ICE servers configured: ${iceServers.length} (TURN/STUN for Docker Desktop)`);
+    log(`ICE servers configured: ${iceServers.length} (0 = direct LAN media via Asterisk ICE host mapping)`);
 
     userAgent = new UserAgent({
       uri,
@@ -324,6 +324,7 @@
       sessionDescriptionHandlerOptions: {
         constraints: { audio: true, video: false },
         peerConnectionConfiguration: { iceServers },
+        iceGatheringTimeout: iceServers.length ? 2000 : 500,
       },
     });
     session = thisSession;

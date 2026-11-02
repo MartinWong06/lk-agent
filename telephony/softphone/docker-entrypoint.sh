@@ -59,6 +59,30 @@ else
   PREFERRED_URL="http://localhost:8088/"
 fi
 
+# LAN browsers reach Asterisk directly (Asterisk advertises SOFTPHONE_MEDIA_IP as its
+# ICE candidate). Only add STUN/TURN when the coturn profile is running — an
+# unreachable TURN server delays every INVITE by the ICE gathering timeout.
+if [ "${SOFTPHONE_TURN:-0}" = "1" ]; then
+  ICE_SERVERS=$(cat <<JSON
+[
+    { "urls": "stun:${TURN_HOST}:3478" },
+    {
+      "urls": "turn:${TURN_HOST}:3478?transport=udp",
+      "username": "${TURN_USER}",
+      "credential": "${TURN_PASSWORD}"
+    },
+    {
+      "urls": "turn:${TURN_HOST}:3478?transport=tcp",
+      "username": "${TURN_USER}",
+      "credential": "${TURN_PASSWORD}"
+    }
+  ]
+JSON
+)
+else
+  ICE_SERVERS="[]"
+fi
+
 cat > /usr/share/nginx/html/config.json <<EOF
 {
   "wsServer": "${WS_SERVER}",
@@ -72,19 +96,7 @@ cat > /usr/share/nginx/html/config.json <<EOF
   "preferredPageHost": "${PUBLIC_HOST}",
   "preferredPageUrl": "${PREFERRED_URL}",
   "httpsEnabled": $([ "$ENABLE_HTTPS" = "1" ] && echo true || echo false),
-  "iceServers": [
-    { "urls": "stun:${TURN_HOST}:3478" },
-    {
-      "urls": "turn:${TURN_HOST}:3478?transport=udp",
-      "username": "${TURN_USER}",
-      "credential": "${TURN_PASSWORD}"
-    },
-    {
-      "urls": "turn:${TURN_HOST}:3478?transport=tcp",
-      "username": "${TURN_USER}",
-      "credential": "${TURN_PASSWORD}"
-    }
-  ]
+  "iceServers": ${ICE_SERVERS}
 }
 EOF
 
