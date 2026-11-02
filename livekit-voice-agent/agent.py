@@ -7,7 +7,7 @@ from typing import Any
 import httpx
 import yaml
 from dotenv import load_dotenv
-from livekit import agents
+from livekit import agents, rtc
 from livekit.agents import (
     Agent,
     AgentServer,
@@ -24,6 +24,7 @@ from livekit.agents import (
     room_io,
 )
 from livekit.agents.llm.mcp import MCPServerHTTP, MCPToolset
+from livekit.agents.voice.room_io.types import NoiseCancellationParams
 from livekit.plugins import noise_cancellation
 
 load_dotenv()
@@ -200,6 +201,14 @@ class Assistant(Agent):
             )
 
 
+def select_noise_cancellation(params: NoiseCancellationParams) -> rtc.NoiseCancellationOptions:
+    # Wideband BVC on 8 kHz phone audio can suppress the caller's voice entirely,
+    # so the speech model never hears a turn and never replies.
+    if params.participant.kind == rtc.ParticipantKind.PARTICIPANT_KIND_SIP:
+        return noise_cancellation.BVCTelephony()
+    return noise_cancellation.BVC()
+
+
 AGENT_NAME = str(AGENT_CFG.get("agent_name") or "enterprise-voice")
 server = AgentServer()
 
@@ -269,7 +278,7 @@ async def entrypoint(ctx: JobContext):
         room=ctx.room,
         room_options=room_io.RoomOptions(
             audio_input=room_io.AudioInputOptions(
-                noise_cancellation=noise_cancellation.BVC(),
+                noise_cancellation=select_noise_cancellation,
             ),
         ),
     )
