@@ -3,14 +3,16 @@
 #   powershell -ExecutionPolicy Bypass -File .\scripts\windows-softphone-env.ps1
 
 $ErrorActionPreference = "Stop"
-$ip = Get-NetIPAddress -AddressFamily IPv4 |
+$virtual = 'vEthernet|WSL|Hyper-V|Docker|VirtualBox|VMware|Loopback|Tailscale|ZeroTier|VPN'
+$cfg = Get-NetIPConfiguration -ErrorAction SilentlyContinue |
   Where-Object {
-    $_.IPAddress -notlike "127.*" -and
-    $_.IPAddress -notlike "169.254.*" -and
-    $_.PrefixOrigin -ne "WellKnown"
+    $_.IPv4DefaultGateway -ne $null -and
+    $_.NetAdapter.Status -eq 'Up' -and
+    $_.InterfaceAlias -notmatch $virtual
   } |
-  Sort-Object -Property InterfaceMetric |
-  Select-Object -First 1 -ExpandProperty IPAddress
+  Select-Object -First 1
+$ip = $null
+if ($cfg) { $ip = ($cfg.IPv4Address | Select-Object -First 1).IPAddress }
 
 if (-not $ip) {
   Write-Error "Could not detect a LAN IPv4 address."

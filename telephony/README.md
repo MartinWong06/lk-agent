@@ -83,6 +83,24 @@ If softphone still crash-loops, confirm `docker compose ps` COMMAND contains
 `/bin/sh -c` (not bare `/docker-entrypoint.sh`), then check
 `docker compose logs softphone kamailio --tail 40`.
 
+## Automated media test
+
+Headless Chrome (fake mic) in Docker registers `1001`, dials, and checks ICE, inbound RTP
+packets and audio energy, and that the call survives past the old ~32 s drop:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\scripts\test-media.ps1   # 9196 echo + 1000 AI
+```
+
+```bash
+sh scripts/test-media.sh            # add --echo-only to skip the LiveKit/AI call
+```
+
+- `9196` (Asterisk echo) isolates browser ↔ Kamailio ↔ Asterisk WebRTC. If this fails, the
+  problem is local (LAN IP / firewall / Docker), not LiveKit.
+- `1000` passes only when the agent greeting audio actually reaches the browser
+  (Asterisk → LiveKit SIP → agent → Inference → back).
+
 ## Configuration (no code edits for routine changes)
 
 | What | File / env |
@@ -106,7 +124,9 @@ docker compose up -d --force-recreate --scale agent=1 agent
 | 8088 | Softphone UI |
 | 8080 | Kamailio SIP over WebSocket |
 | 5060 | Kamailio SIP UDP/TCP |
+| 8443 | Softphone HTTPS UI + WSS → Kamailio |
 | 10000–10050/udp | Asterisk RTP (softphone + LiveKit) |
+| 3478, 49160–49169/udp | coturn (opt-in `turn` profile only) |
 
 ## HA layout
 
@@ -124,7 +144,7 @@ Optional profile `full-media` includes an rtpengine image for advanced WebRTC br
 2. Softphone **INVITE** `sip:1000@voice.local` → Kamailio dispatches to Asterisk
 3. Asterisk dialplan `Dial(PJSIP/1000@livekit-sip)` to LiveKit SIP host
 4. LiveKit creates room `call-*` and dispatches agent **`enterprise-voice`**
-5. Duplex GPT-Live answers in the room
+5. The speech model from `agent.yaml` answers in the room (`gpt-realtime-2.1-mini` by default)
 
 ## Troubleshooting
 
@@ -141,15 +161,23 @@ Optional profile `full-media` includes an rtpengine image for advanced WebRTC br
   `onSessionDescriptionHandler` / `track` events and blocking overlapping Call AI clicks.
   Recreate softphone + hard-refresh. Click **Call AI once**; use Hang up before redialing.
 - Call **Established**, ICE briefly `connected`, then `disconnected` / `remote: muted=true`:
-  softphone WebRTC never got RTP. On Docker Desktop, use the bundled **coturn** relay:
-  1. `SOFTPHONE_MEDIA_IP` / `SOFTPHONE_PUBLIC_HOST` = LAN IP (not `127.0.0.1`)
-  2. `docker compose up -d --build --force-recreate coturn asterisk softphone`
-  3. Softphone log should show `ICE servers configured: 3` and later `ICE pair … relay`
-  4. Asterisk boot log: **no** `external_media` on UDP; `media_address=<LAN>`
-  5. `docker compose ps` — `asterisk`/`kamailio`/`coturn`/`softphone` all Up (not Restarting)
-  6. Allow Windows Firewall UDP **3478**, **49160–49169**, **10000–10050**
-  If you see softphone `WSS 1006` / INVITE `503`/`408`: Kamailio/Asterisk are down — run
-  `docker compose ps` and `docker compose logs asterisk kamailio coturn --tail 80`.
+  the browser never received RTP from Asterisk. Root causes (all fixed in this repo):
+  1. Asterisk only advertised its container IP (`172.x`) as an ICE candidate, which a Windows
+     browser cannot reach. `asterisk/entrypoint.sh` now renders `rtp.conf`
+     `[ice_host_candidates] <container-ip> => SOFTPHONE_MEDIA_IP,include_local_address`
+     so ICE uses the published UDP ports 10000–10050 on your LAN IP. (`include_local_address`
+     is required — without it Asterisk never sends its own ICE checks and DTLS never starts.)
+  2. Kamailio did not `record_route()`, so the browser's ACK/BYE never reached Asterisk and
+     every call was torn down ~32 s after answer.
+  Checklist: `SOFTPHONE_MEDIA_IP` = this PC's LAN IP (not vEthernet/WSL `172.x`, not
+  `127.0.0.1`), open `https://<LAN>:8443/`, Windows Firewall allows UDP **10000–10050**
+  (bringup script adds it when run as Administrator). TURN/coturn is **not** needed on a LAN;
+  it is an opt-in profile (`SOFTPHONE_TURN=1 docker compose --profile turn up -d`).
+- Softphone `WSS 1006` / INVITE `503`/`408`: Kamailio's WS listener or Asterisk was down.
+  Kamailio now ships `netbase` (without `/etc/protocols` it logs `tcp_init(): could not get
+  TCP protocol number`), its healthcheck probes `:8080`, Asterisk is only healthy once PJSIP
+  loaded `from-kamailio`, and nginx re-resolves `kamailio` so recreating it no longer leaves
+  WSS pointing at a dead IP. Run `scripts\doctor-windows.ps1`.
   Do **not** use `docker-compose.host-asterisk.yml` on Docker Desktop Windows.
 - Call **Establishing → Terminated (~30s)** with no Established: INVITE timed out (Kamailio↔Asterisk
   or Asterisk↔LiveKit). Prefer plain bridge compose on Docker Desktop Windows — avoid
@@ -167,12 +195,20 @@ Optional profile `full-media` includes an rtpengine image for advanced WebRTC br
   is full-duplex (`DuplexModel`). Agent logs should show `agent_state … -> speaking` and
   `on_enter: generate_reply completed` (or a clear decline / “no agent speaking state” error).
   Telephony `config/agent.yaml` disables MCP/weather by default while bringing up audio.
+  SIP callers use `noise_cancellation.BVCTelephony()` (wideband `BVC()` can suppress 8 kHz
+  phone audio so the model never hears a turn). `agent.py` is baked into the image —
+  `bringup-windows.ps1` always rebuilds the agent so code changes are not silently ignored.
 - Linux-only host Asterisk overlay: `docker-compose.host-asterisk.yml` (not for Desktop Windows).
 - Softphone cannot register: check Kamailio logs (`docker compose logs kamailio`) and `wsServer` / env-rendered `config.json`
 - `404 No trunk found` from LiveKit: wrong `LIVEKIT_SIP_HOST` (see above) or trunk numbers / `allowed_addresses` mismatch
 - Agent `Connection timeout` to LiveKit from Docker: agents use `network_mode: host` in compose for Cloud WSS
 - Set `EXTERNAL_SIP_IP` to your current public egress IP (it can rotate on cloud VMs)
 - One-way audio: open UDP 10000–10050; for remote browsers, set public IPs / TLS WSS and ICE carefully
+- `test-media` **echo passes** but the **AI call is silent** while agent logs show
+  `user said: …` and `agent_state … -> speaking`: the agent's audio from LiveKit Cloud is not
+  getting back through your router to Asterisk. Asterisk advertises `EXTERNAL_SIP_IP:10000-10050`
+  to LiveKit — set `EXTERNAL_SIP_IP` to your *current* public IP and port-forward UDP
+  10000–10050 (and disable "SIP ALG") on the router to this PC.
 - `setup_sip.py` `Conflicting inbound SIP Trunks`: trunk already exists — skip the script or update
   the existing trunk in LiveKit Cloud (do not re-create the same DID)
 - On Windows with `network_mode: host` agents, prefer `--scale agent=1` for the first call test

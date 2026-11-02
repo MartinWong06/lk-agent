@@ -34,16 +34,53 @@ function Invoke-Docker {
 }
 
 function Get-LanIPv4 {
-  $ip = Get-NetIPAddress -AddressFamily IPv4 |
+  # Prefer the adapter that owns the default route; skip Hyper-V/WSL/Docker/VPN virtual NICs
+  # (picking vEthernet 172.x makes Asterisk advertise an IP the browser cannot reach).
+  $virtual = 'vEthernet|WSL|Hyper-V|Docker|VirtualBox|VMware|Loopback|Tailscale|ZeroTier|VPN'
+  $cfg = Get-NetIPConfiguration -ErrorAction SilentlyContinue |
     Where-Object {
-      $_.IPAddress -notlike '127.*' -and
-      $_.IPAddress -notlike '169.254.*' -and
-      $_.PrefixOrigin -ne 'WellKnown'
+      $_.IPv4DefaultGateway -ne $null -and
+      $_.NetAdapter.Status -eq 'Up' -and
+      $_.InterfaceAlias -notmatch $virtual
     } |
-    Sort-Object -Property InterfaceMetric |
-    Select-Object -First 1 -ExpandProperty IPAddress
+    Sort-Object { $_.IPv4DefaultGateway.RouteMetric + $_.NetIPv4Interface.InterfaceMetric } |
+    Select-Object -First 1
+  $ip = $null
+  if ($cfg) { $ip = ($cfg.IPv4Address | Select-Object -First 1).IPAddress }
+  if (-not $ip) {
+    $ip = Get-NetIPAddress -AddressFamily IPv4 |
+      Where-Object {
+        $_.IPAddress -notlike '127.*' -and
+        $_.IPAddress -notlike '169.254.*' -and
+        $_.PrefixOrigin -ne 'WellKnown' -and
+        $_.InterfaceAlias -notmatch $virtual
+      } |
+      Sort-Object -Property InterfaceMetric |
+      Select-Object -First 1 -ExpandProperty IPAddress
+  }
   if (-not $ip) { throw 'Could not detect a LAN IPv4 address.' }
   return $ip
+}
+
+function Open-FirewallPorts {
+  $isAdmin = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole(
+    [Security.Principal.WindowsBuiltInRole]::Administrator)
+  if (-not $isAdmin) {
+    Write-Host 'NOTE: not elevated - skipping Windows Firewall rules. If audio is one-way/silent, rerun'
+    Write-Host '      this script as Administrator once (opens TCP 8443 and UDP 10000-10050).'
+    return
+  }
+  $rules = @(
+    @{ Name = 'EnterpriseVoice-Softphone-HTTPS'; Protocol = 'TCP'; Port = '8443' },
+    @{ Name = 'EnterpriseVoice-Asterisk-RTP'; Protocol = 'UDP'; Port = '10000-10050' }
+  )
+  foreach ($r in $rules) {
+    if (-not (Get-NetFirewallRule -DisplayName $r.Name -ErrorAction SilentlyContinue)) {
+      New-NetFirewallRule -DisplayName $r.Name -Direction Inbound -Action Allow `
+        -Protocol $r.Protocol -LocalPort $r.Port -Profile Any | Out-Null
+      Write-Host ('Firewall rule added: ' + $r.Name)
+    }
+  }
 }
 
 function Set-EnvKey([string]$path, [string]$key, [string]$value) {
@@ -73,31 +110,29 @@ Write-Host ('LAN IP: ' + $lan)
 Write-Host ('Updating ' + $envFile + ' ...')
 Set-EnvKey $envFile 'SOFTPHONE_PUBLIC_HOST' $lan
 Set-EnvKey $envFile 'SOFTPHONE_MEDIA_IP' $lan
-# Coturn external-ip must match LAN (used by browser ICE + compose command)
-if (-not (Select-String -Path $envFile -Pattern '^TURN_USER=' -Quiet)) {
-  Add-Content -Path $envFile -Value "TURN_USER=softphone"
-}
-if (-not (Select-String -Path $envFile -Pattern '^TURN_PASSWORD=' -Quiet)) {
-  Add-Content -Path $envFile -Value "TURN_PASSWORD=change-me-turn"
-}
 Set-EnvKey $envFile 'SOFTPHONE_WS_SERVER' ('wss://' + $lan + ':8443/ws')
 Set-EnvKey $envFile 'SOFTPHONE_ENABLE_HTTPS' '1'
+# LAN softphone media goes straight to Asterisk (ice_host_candidates); TURN is opt-in.
+if (-not (Select-String -Path $envFile -Pattern '^\s*SOFTPHONE_TURN\s*=' -Quiet)) {
+  Set-EnvKey $envFile 'SOFTPHONE_TURN' '0'
+}
 
-Write-Host 'Stopping any previous stack (including host-asterisk overlay)...'
-[void](Invoke-Docker -AllowFail -DockerArgs @('compose','-f','docker-compose.yml','-f','docker-compose.host-asterisk.yml','down'))
-[void](Invoke-Docker -DockerArgs @('compose','-f','docker-compose.yml','down'))
+Open-FirewallPorts
 
-Write-Host 'Building/starting softphone + kamailio + asterisk (bridge)...'
-[void](Invoke-Docker -DockerArgs @('compose','-f','docker-compose.yml','up','-d','--build','--force-recreate','softphone','kamailio','asterisk'))
+Write-Host 'Stopping any previous stack (including host-asterisk overlay and coturn)...'
+[void](Invoke-Docker -AllowFail -DockerArgs @('compose','-f','docker-compose.yml','-f','docker-compose.host-asterisk.yml','--profile','turn','down','--remove-orphans'))
+[void](Invoke-Docker -AllowFail -DockerArgs @('compose','-f','docker-compose.yml','--profile','turn','down','--remove-orphans'))
 
-Write-Host 'Starting agent (reuse local image if present; rebuild only if needed)...'
-$agentOk = Invoke-Docker -AllowFail -DockerArgs @('compose','-f','docker-compose.yml','up','-d','--no-build','--scale','agent=1','agent')
+Write-Host 'Building/starting asterisk + kamailio + softphone (bridge)...'
+[void](Invoke-Docker -DockerArgs @('compose','-f','docker-compose.yml','up','-d','--build','--force-recreate','asterisk','kamailio','softphone'))
+
+# Always rebuild the agent: agent.py is baked into the image, so --no-build silently
+# keeps old code (e.g. a previous model/noise-cancellation setup).
+Write-Host 'Building/starting agent...'
+$agentOk = Invoke-Docker -AllowFail -DockerArgs @('compose','-f','docker-compose.yml','up','-d','--build','--force-recreate','--scale','agent=1','agent')
 if (-not $agentOk) {
-  Write-Host 'No usable agent image - trying rebuild from Docker Hub astral/uv base...'
-  $agentOk = Invoke-Docker -AllowFail -DockerArgs @('compose','-f','docker-compose.yml','build','agent')
-  if ($agentOk) {
-    $agentOk = Invoke-Docker -AllowFail -DockerArgs @('compose','-f','docker-compose.yml','up','-d','--scale','agent=1','agent')
-  }
+  Write-Host 'Agent build failed (registry/network) - falling back to the existing local image...'
+  $agentOk = Invoke-Docker -AllowFail -DockerArgs @('compose','-f','docker-compose.yml','up','-d','--no-build','--force-recreate','--scale','agent=1','agent')
 }
 if (-not $agentOk) {
   Write-Host 'WARNING: agent did not start (registry/network). Softphone SIP path is still up.'
@@ -123,4 +158,7 @@ Write-Host '  step1: Accept the self-signed certificate warning (Advanced -> Pro
 Write-Host '  step2: Allow microphone'
 Write-Host '  step3: Register -> Call AI once'
 Write-Host 'Do NOT use http://localhost:8088/ (ICE fails) or plain http://LAN:8088/ (mic blocked).'
-Write-Host 'Expect INVITE progress/accepted then iceConnectionState=connected.'
+Write-Host 'Expect INVITE accepted then iceConnectionState=connected and remote track unmuted.'
+Write-Host ''
+Write-Host 'Automated check (headless browser, echo 9196 + AI 1000):'
+Write-Host '  powershell -ExecutionPolicy Bypass -File .\scripts\test-media.ps1'
