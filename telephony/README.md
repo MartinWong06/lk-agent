@@ -101,6 +101,50 @@ sh scripts/test-media.sh            # add --echo-only to skip the LiveKit/AI cal
 - `1000` passes only when the agent greeting audio actually reaches the browser
   (Asterisk → LiveKit SIP → agent → Inference → back).
 
+## Deploy to a Linux VPS
+
+Requirements: Ubuntu/Debian (or any Linux) VPS with a public IPv4, Docker Engine and
+Compose ≥ 2.24 (`curl -fsSL https://get.docker.com | sh`), 2 vCPU / 2 GB RAM is plenty.
+Optional but recommended: a DNS A record (e.g. `voice.example.com`) pointing at the VPS,
+so you get a real Let's Encrypt certificate instead of a browser warning.
+
+```bash
+git clone <this repo> && cd lk-agent/telephony
+cp .env.example .env
+# fill LIVEKIT_URL, LIVEKIT_API_KEY, LIVEKIT_API_SECRET, LIVEKIT_SIP_HOST
+sudo sh scripts/vps-setup.sh --domain voice.example.com --email you@example.com
+# (no domain yet?  sudo sh scripts/vps-setup.sh   → public IP + self-signed cert)
+uv run --with livekit-api --with python-dotenv python livekit/setup_sip.py   # trunk allowlists the VPS IP
+sh scripts/test-security.sh && sh scripts/test-media.sh
+```
+
+`vps-setup.sh` sets `PRODUCTION=1`, the public host/IPs, replaces every empty or
+`change-me` secret in `.env` with a random one (and prints the logins), configures ufw,
+starts the stack with [`docker-compose.prod.yml`](docker-compose.prod.yml) and issues the
+certificate (renewed by the `certbot` container). Re-running it is safe: real values are kept.
+If it regenerated `LIVEKIT_SIP_PASSWORD`, re-run `setup_sip.py` (it replaces its old trunk).
+
+Open `https://voice.example.com/`, enter the page login (basic auth), then the SIP login,
+Register, dial `9196` (echo) and `1000` (AI).
+
+What is protected in production:
+
+| Layer | Protection |
+|-------|------------|
+| Network | Only 80/tcp, 443/tcp and 10000–10050/udp published (Kamailio 5060/8080, Asterisk, agent stay on the Docker network); ufw denies the rest. Docker-published ports bypass ufw, which is why the overlay publishes so little. |
+| Web | TLS (Let's Encrypt), HTTP→HTTPS, HSTS, CSP / frame / referrer headers, basic auth, per-IP rate limits on pages and the WSS handshake, no server version, no build files served. |
+| SIP | Digest auth on REGISTER and every INVITE (auth user must equal From user), only INVITE/REGISTER as initial requests, no relaying to foreign domains, in-dialog requests only towards Asterisk, scanner UAs dropped, pike flood ban on direct SIP, WebSocket closed after 5 wrong passwords. |
+| Credentials | SIP password not in `config.json` (users type it), containers refuse `change-me` / short passwords, `.env` mode 600, agent only receives `LIVEKIT_*`. |
+| Cost | `MAX_AI_CALLS` concurrent AI calls (busy beyond that), `MAX_CALL_SECONDS` hard call limit, echo test capped at 120 s. |
+
+More accounts: `SIP_USERS=alice:<long-random>,bob:<long-random>` in `.env`, then
+`docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d kamailio`.
+Logs are rotated (10 MB × 5 per container): `docker compose logs -f kamailio`.
+
+Browsers on any network work without TURN as long as UDP 10000–10050 reaches the VPS
+(Asterisk advertises the public IP). Only for callers behind UDP-blocking firewalls add
+`SOFTPHONE_TURN=1` and `--profile turn` (and open 3478 + 49160–49169/udp).
+
 ## Configuration (no code edits for routine changes)
 
 | What | File / env |
@@ -118,6 +162,8 @@ docker compose up -d --force-recreate --scale agent=1 agent
 ```
 
 ## Ports
+
+Dev/LAN stack (`docker-compose.yml`). Production publishes only 80, 443 and RTP.
 
 | Port | Service |
 |------|---------|
