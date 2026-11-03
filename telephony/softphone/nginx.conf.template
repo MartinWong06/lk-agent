@@ -11,33 +11,76 @@ http {
   default_type application/octet-stream;
   sendfile on;
   keepalive_timeout 65;
+  server_tokens off;
+  client_max_body_size 64k;
 
-  # Healthcheck / local plain HTTP
+  # Per-client limits (Kamailio only sees this proxy's IP, so throttle here)
+  limit_req_zone  $binary_remote_addr zone=pages:10m rate=20r/s;
+  limit_req_zone  $binary_remote_addr zone=ws_handshake:10m rate=30r/m;
+  limit_conn_zone $binary_remote_addr zone=ws_conn:10m;
+  limit_req_status 429;
+  limit_conn_status 429;
+
+  # Re-resolve via Docker DNS so a recreated Kamailio (new IP) does not leave WSS
+  # proxying to a dead address (browser sees code 1006).
+  resolver 127.0.0.11 valid=10s ipv6=off;
+
+  # Plain HTTP: healthcheck, ACME http-01 challenges, and either the UI (dev) or a
+  # redirect to HTTPS (production).
   server {
     listen 80;
     server_name _;
     root /usr/share/nginx/html;
+
+    location = /healthz {
+      access_log off;
+      default_type text/plain;
+      return 200 "ok\n";
+    }
+
+    location /.well-known/acme-challenge/ {
+      root /var/www/certbot;
+    }
+
     location / {
-      try_files $uri /index.html;
+      __HTTP_LOCATION__
     }
   }
 
-  # HTTPS UI + WSS proxy to Kamailio (secure context for getUserMedia on LAN IP)
+  # HTTPS UI + WSS proxy to Kamailio (secure context for getUserMedia)
   server {
     listen 443 ssl;
+    http2 on;
     server_name _;
     root /usr/share/nginx/html;
 
     ssl_certificate     /etc/nginx/certs/cert.pem;
     ssl_certificate_key /etc/nginx/certs/key.pem;
     ssl_protocols       TLSv1.2 TLSv1.3;
+    ssl_prefer_server_ciphers off;
+    ssl_session_cache   shared:SSL:5m;
+    ssl_session_timeout 1d;
 
-    # Re-resolve via Docker DNS so a recreated Kamailio (new IP) does not leave WSS
-    # proxying to a dead address (browser sees code 1006).
-    resolver 127.0.0.11 valid=10s ipv6=off;
+    add_header X-Content-Type-Options "nosniff" always;
+    add_header X-Frame-Options "DENY" always;
+    add_header Referrer-Policy "no-referrer" always;
+    add_header Permissions-Policy "microphone=(self), camera=(), geolocation=()" always;
+    add_header Content-Security-Policy "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; media-src 'self' blob: mediastream:; connect-src 'self' wss:; frame-ancestors 'none'; base-uri 'none'; form-action 'none'" always;
+    __HSTS__
+
     set $kamailio_upstream http://__KAMAILIO_HOST__:8080;
 
+    location = /healthz {
+      access_log off;
+      default_type text/plain;
+      return 200 "ok\n";
+    }
+
+    # SIP over WSS is protected by SIP digest auth in Kamailio (browsers do not
+    # reliably send HTTP basic auth on WebSocket upgrades).
     location /ws {
+      limit_req zone=ws_handshake burst=10 nodelay;
+      limit_conn ws_conn 5;
       proxy_pass $kamailio_upstream;
       proxy_connect_timeout 5s;
       proxy_http_version 1.1;
@@ -50,8 +93,21 @@ http {
       proxy_send_timeout 86400s;
     }
 
+    location = /config.json {
+      __AUTH_BASIC__
+      limit_req zone=pages burst=20 nodelay;
+      add_header Cache-Control "no-store" always;
+      add_header X-Content-Type-Options "nosniff" always;
+      add_header X-Frame-Options "DENY" always;
+      add_header Referrer-Policy "no-referrer" always;
+      add_header Content-Security-Policy "default-src 'none'" always;
+      __HSTS__
+    }
+
     location / {
-      try_files $uri /index.html;
+      __AUTH_BASIC__
+      limit_req zone=pages burst=40 nodelay;
+      try_files $uri $uri/ =404;
     }
   }
 }
