@@ -1,0 +1,58 @@
+# Production overlay for a Linux VPS with a public IP.
+#
+#   docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d --build
+#
+# Differences from the LAN/dev stack:
+#   - Only 80/tcp, 443/tcp (softphone + WSS) and 10000-10050/udp (RTP) are published.
+#     Kamailio SIP/WS and Asterisk are reachable only inside the Docker network.
+#   - PRODUCTION=1: entrypoints refuse change-me / short passwords, the SIP password
+#     is NOT published in config.json (users log in on the page), no SIP trace,
+#     HTTP redirects to HTTPS, HSTS on.
+#   - TLS from Let's Encrypt (certbot profile) with self-signed fallback until issued.
+#
+# Requires Docker Compose >= 2.24 (for !reset / !override).
+
+services:
+  kamailio:
+    ports: !reset []
+    environment:
+      PRODUCTION: "1"
+
+  asterisk:
+    environment:
+      PRODUCTION: "1"
+
+  softphone:
+    ports: !override
+      - "80:80"
+      - "443:443"
+    environment:
+      PRODUCTION: "1"
+      SOFTPHONE_HTTPS_PORT: "443"
+      SOFTPHONE_WS_SERVER: ""
+      SOFTPHONE_EMBED_CREDENTIALS: ${SOFTPHONE_EMBED_CREDENTIALS:-0}
+      TLS_CERT_FILE: /etc/letsencrypt/live/${SOFTPHONE_PUBLIC_HOST}/fullchain.pem
+      TLS_KEY_FILE: /etc/letsencrypt/live/${SOFTPHONE_PUBLIC_HOST}/privkey.pem
+      SOFTPHONE_CERT_RELOAD_SECONDS: "3600"
+    volumes:
+      - ./data/letsencrypt:/etc/letsencrypt:ro
+      - ./data/certbot-www:/var/www/certbot:ro
+
+  # Let's Encrypt (http-01 via the softphone's port 80). First issue:
+  #   docker compose -f docker-compose.yml -f docker-compose.prod.yml --profile letsencrypt \
+  #     run --rm certbot certonly --webroot -w /var/www/certbot -d $DOMAIN -m you@example.com --agree-tos -n
+  # Then keep it running to renew automatically:
+  #   ... --profile letsencrypt up -d certbot
+  certbot:
+    image: certbot/certbot:v3.0.1
+    profiles: ["letsencrypt"]
+    restart: unless-stopped
+    logging:
+      driver: json-file
+      options:
+        max-size: "5m"
+        max-file: "3"
+    volumes:
+      - ./data/letsencrypt:/etc/letsencrypt
+      - ./data/certbot-www:/var/www/certbot
+    entrypoint: ["/bin/sh", "-c", "trap exit TERM; while :; do certbot renew --webroot -w /var/www/certbot --quiet; sleep 12h & wait $${!}; done"]
