@@ -5,6 +5,8 @@
 //   DIAL            9196 (Asterisk echo) | 1000 (LiveKit AI)   default 9196
 //   HOLD_SECONDS    how long to keep the call up    default 45
 //   MIN_ENERGY      min inbound totalAudioEnergy to call it "audible"  default 0.01
+//   SIP_USER / SIP_PASSWORD           typed into the login form when config.json has no password
+//   BASIC_AUTH_USER / BASIC_AUTH_PASSWORD   HTTP basic auth in front of the UI (production)
 import { chromium } from "playwright";
 
 const url = process.env.SOFTPHONE_URL;
@@ -25,7 +27,13 @@ const browser = await chromium.launch({
     "--ignore-certificate-errors",
   ],
 });
-const context = await browser.newContext({ ignoreHTTPSErrors: true });
+const basicUser = process.env.BASIC_AUTH_USER;
+const context = await browser.newContext({
+  ignoreHTTPSErrors: true,
+  ...(basicUser
+    ? { httpCredentials: { username: basicUser, password: process.env.BASIC_AUTH_PASSWORD || "" } }
+    : {}),
+});
 const page = await context.newPage();
 
 const consoleLines = [];
@@ -96,6 +104,14 @@ try {
   await page.goto(url, { waitUntil: "load", timeout: 20000 });
   if (!(await waitFor(/config loaded/, 10000))) result.reasons.push("softphone config.json did not load");
 
+  if (await page.isVisible("#login")) {
+    if (!process.env.SIP_PASSWORD) {
+      result.reasons.push("page asks for SIP credentials — set SIP_USER / SIP_PASSWORD");
+      throw new Error("login");
+    }
+    if (process.env.SIP_USER) await page.fill("#sip-user", process.env.SIP_USER);
+    await page.fill("#sip-password", process.env.SIP_PASSWORD);
+  }
   await page.click("#btn-register");
   if (!(await waitFor(/register state: Registered/, 15000))) {
     result.reasons.push("REGISTER failed (check Kamailio / WSS)");
