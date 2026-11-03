@@ -9,6 +9,7 @@
 #     is NOT published in config.json (users log in on the page), no SIP trace,
 #     HTTP redirects to HTTPS, HSTS on.
 #   - TLS from Let's Encrypt (certbot profile) with self-signed fallback until issued.
+#   - The agent runs on the internal bridge network (no host networking).
 #
 # Requires Docker Compose >= 2.24 (for !reset / !override).
 
@@ -37,6 +38,13 @@ services:
     volumes:
       - ./data/letsencrypt:/etc/letsencrypt:ro
       - ./data/certbot-www:/var/www/certbot:ro
+
+  # On a Linux host the bridge network reaches LiveKit Cloud fine, and keeps the
+  # worker's health/debug HTTP port (8081) off the public interface.
+  agent:
+    network_mode: !reset null
+    networks:
+      - voice
 
   # Let's Encrypt (http-01 via the softphone's port 80). First issue:
   #   docker compose -f docker-compose.yml -f docker-compose.prod.yml --profile letsencrypt \

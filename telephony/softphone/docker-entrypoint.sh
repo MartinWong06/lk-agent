@@ -43,6 +43,9 @@ if [ "$PRODUCTION" = "1" ]; then
       change-me*|'') fail "SOFTPHONE_BASIC_AUTH_PASSWORD is unset or a change-me default" ;;
     esac
   fi
+  if [ -z "$BASIC_USER" ]; then
+    echo "WARNING: SOFTPHONE_BASIC_AUTH_USER unset — anyone can load the softphone page"
+  fi
   if [ "$EMBED_CREDENTIALS" = "1" ]; then
     echo "WARNING: SOFTPHONE_EMBED_CREDENTIALS=1 publishes the SIP password in config.json"
   fi
@@ -179,7 +182,7 @@ fi
 if [ "$HTTP_REDIRECT" = "1" ]; then
   HTTP_LOCATION='return 301 https://$host'"$([ "$HTTPS_PORT" = "443" ] || echo ":$HTTPS_PORT")"'$request_uri;'
 else
-  HTTP_LOCATION='try_files $uri /index.html;'
+  HTTP_LOCATION='try_files $uri $uri/ =404;'
 fi
 
 if [ "$HSTS" = "1" ]; then
