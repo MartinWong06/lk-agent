@@ -9,6 +9,9 @@
   const btnUnreg = document.getElementById("btn-unregister");
   const btnCall = document.getElementById("btn-call");
   const btnHangup = document.getElementById("btn-hangup");
+  const loginEl = document.getElementById("login");
+  const userEl = document.getElementById("sip-user");
+  const passwordEl = document.getElementById("sip-password");
 
   let config = null;
   let userAgent = null;
@@ -211,7 +214,15 @@
     const res = await fetch("./config.json", { cache: "no-store" });
     config = await res.json();
     destEl.value = config.aiExtension || "1000";
-    setStatus(`Ready — ${config.authorizationUser}@${config.domain}`, false);
+    userEl.value = config.authorizationUser || "";
+    // Production does not ship the SIP password in config.json — ask for it.
+    loginEl.hidden = !!config.password;
+    setStatus(
+      config.password
+        ? `Ready — ${config.authorizationUser}@${config.domain}`
+        : "Enter your SIP user and password, then Register",
+      false
+    );
     log(`config loaded ws=${config.wsServer}`);
     const preferred = config.preferredPageUrl ||
       (config.preferredPageHost ? `https://${config.preferredPageHost}:8443/` : "");
@@ -237,7 +248,13 @@
     }
     const { UserAgent, Registerer, Inviter } = SIP;
 
-    const uri = UserAgent.makeURI(`sip:${config.authorizationUser}@${config.domain}`);
+    const sipUser = config.password ? config.authorizationUser : userEl.value.trim();
+    const sipPassword = config.password || passwordEl.value;
+    if (!sipUser || !sipPassword) {
+      setStatus("SIP user and password are required", false);
+      return;
+    }
+    const uri = UserAgent.makeURI(`sip:${sipUser}@${config.domain}`);
     if (!uri) {
       setStatus("Invalid SIP URI", false);
       return;
@@ -249,9 +266,9 @@
     userAgent = new UserAgent({
       uri,
       transportOptions: { server: config.wsServer },
-      authorizationUsername: config.authorizationUser,
-      authorizationPassword: config.password,
-      displayName: config.displayName || config.authorizationUser,
+      authorizationUsername: sipUser,
+      authorizationPassword: sipPassword,
+      displayName: config.displayName || sipUser,
       sessionDescriptionHandlerFactoryOptions: {
         constraints: { audio: true, video: false },
         peerConnectionConfiguration: { iceServers },
@@ -287,7 +304,15 @@
         setStatus("Unregistered", false);
       }
     });
-    await registerer.register();
+    await registerer.register({
+      requestDelegate: {
+        onReject(response) {
+          const code = response.message.statusCode;
+          log(`REGISTER rejected ${code} ${response.message.reasonPhrase}`);
+          setStatus(code === 401 || code === 403 ? "Wrong SIP user or password" : `Register failed (${code})`, false);
+        },
+      },
+    });
     window._Inviter = Inviter;
   }
 

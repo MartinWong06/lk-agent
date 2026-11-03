@@ -66,6 +66,34 @@ def main() -> int:
     if "resolver 127.0.0.11" not in nginx:
         errors.append("nginx must re-resolve Kamailio via Docker DNS (stale IP → WSS 1006)")
 
+    # Security / production
+    for needle, why in (
+        ("pv_proxy_authenticate", "initial INVITEs must require SIP digest auth"),
+        ("pv_www_authenticate", "REGISTER must require SIP digest auth"),
+        ('"Relay Forbidden"', "requests for foreign domains must be refused (no open relay)"),
+        ("ws_close(1008", "WebSockets must be closed after repeated auth failures"),
+        ("pike_check_req", "direct UDP/TCP SIP floods must be rate limited (pike)"),
+    ):
+        if needle not in kam_cfg:
+            errors.append(f"kamailio.cfg: {why}")
+    if "limit_req zone=ws_handshake" not in nginx or "server_tokens off" not in nginx:
+        errors.append("nginx must rate-limit /ws and hide its version")
+    dial = (ROOT / "asterisk" / "conf" / "extensions.conf.template").read_text(encoding="utf-8")
+    if "GROUP_COUNT(ai-calls)" not in dial or "TIMEOUT(absolute)" not in dial:
+        errors.append("dialplan must cap concurrent AI calls and call duration (cost guard)")
+    prod = ROOT / "docker-compose.prod.yml"
+    need(prod, "production compose overlay")
+    if prod.exists():
+        ptext = prod.read_text(encoding="utf-8")
+        kam_prod = ptext.split("  kamailio:", 1)[-1].split("\n  asterisk:", 1)[0]
+        if "ports: !reset []" not in kam_prod:
+            errors.append("docker-compose.prod.yml must not publish Kamailio ports")
+        if 'PRODUCTION: "1"' not in ptext:
+            errors.append("docker-compose.prod.yml must set PRODUCTION=1")
+    agent_block = compose.split("\n  agent:", 1)[-1]
+    if "env_file" in agent_block:
+        errors.append("agent must not get the whole .env (SIP/TURN passwords); pass LIVEKIT_* only")
+
     agent_yaml = ROOT / "config" / "agent.yaml"
     if agent_yaml.exists():
         text = agent_yaml.read_text(encoding="utf-8")
@@ -73,7 +101,6 @@ def main() -> int:
             if key not in text:
                 errors.append(f"agent.yaml missing {key}")
 
-    dial = (ROOT / "asterisk" / "conf" / "extensions.conf.template").read_text(encoding="utf-8")
     if "livekit-sip" not in dial or "AI_EXTENSION" not in dial and "__AI_EXTENSION__" not in dial:
         errors.append("dialplan must Dial via livekit-sip and AI extension placeholder")
 

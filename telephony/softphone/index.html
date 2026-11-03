@@ -19,6 +19,12 @@
 
     <section class="panel">
       <p id="status" class="status">Loading config…</p>
+      <form id="login" class="row" autocomplete="on" hidden>
+        <label for="sip-user">User</label>
+        <input id="sip-user" name="username" type="text" autocomplete="username" />
+        <label for="sip-password">Password</label>
+        <input id="sip-password" name="password" type="password" autocomplete="current-password" />
+      </form>
       <div class="row">
         <button id="btn-register" type="button">Register</button>
         <button id="btn-unregister" type="button" disabled>Unregister</button>

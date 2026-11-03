@@ -49,6 +49,22 @@ async def main() -> int:
     # IP allowlist is the reliable match for Asterisk/NAT (digest auth is optional).
     allowed_addresses = [a.strip() for a in allow.split(",") if a.strip()]
 
+    # Re-runnable (e.g. after rotating LIVEKIT_SIP_PASSWORD): replace what we created
+    # before, otherwise LiveKit rejects a second trunk for the same DID.
+    dispatch_name = f"dispatch-{agent_name}"
+    old_rules = await lk.sip.list_dispatch_rule(api.ListSIPDispatchRuleRequest())
+    for r in old_rules.items:
+        if r.name == dispatch_name:
+            await lk.sip.delete_dispatch_rule(
+                api.DeleteSIPDispatchRuleRequest(sip_dispatch_rule_id=r.sip_dispatch_rule_id)
+            )
+            print(f"removed old dispatch rule {r.sip_dispatch_rule_id}")
+    old_trunks = await lk.sip.list_inbound_trunk(api.ListSIPInboundTrunkRequest())
+    for t in old_trunks.items:
+        if t.name == "asterisk-enterprise-voice":
+            await lk.sip.delete_trunk(api.DeleteSIPTrunkRequest(sip_trunk_id=t.sip_trunk_id))
+            print(f"removed old inbound trunk {t.sip_trunk_id}")
+
     trunk = await lk.sip.create_inbound_trunk(
         api.CreateSIPInboundTrunkRequest(
             trunk=api.SIPInboundTrunkInfo(
@@ -71,7 +87,7 @@ async def main() -> int:
                 ),
             ),
             trunk_ids=[trunk.sip_trunk_id],
-            name=f"dispatch-{agent_name}",
+            name=dispatch_name,
             room_config=api.RoomConfiguration(
                 agents=[
                     api.RoomAgentDispatch(agent_name=agent_name),

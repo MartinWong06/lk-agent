@@ -3,16 +3,27 @@ static=yes
 writeprotect=no
 
 [from-internal]
-; Softphone dials __AI_EXTENSION__; Asterisk bridges to LiveKit DID on the inbound trunk
-exten => __AI_EXTENSION__,1,NoOp(Routing to LiveKit duplex agent)
+; Softphone dials __AI_EXTENSION__; Asterisk bridges to LiveKit DID on the inbound trunk.
+; Cost guards: at most __MAX_AI_CALLS__ concurrent AI calls, each capped at
+; __MAX_CALL_SECONDS__ seconds (LiveKit SIP + Inference bill per minute).
+exten => __AI_EXTENSION__,1,NoOp(Routing to LiveKit agent)
+ same => n,Set(GROUP()=ai-calls)
+ same => n,GotoIf($[${GROUP_COUNT(ai-calls)} > __MAX_AI_CALLS__]?busy)
+ same => n,Set(TIMEOUT(absolute)=__MAX_CALL_SECONDS__)
  same => n,Set(CALLERID(num)=${IF($[${LEN(${CALLERID(num)})}>0]?${CALLERID(num)}:1001)})
  same => n,Dial(PJSIP/__LIVEKIT_DID__@livekit-sip,120)
  same => n,Hangup()
+ same => n(busy),NoOp(AI call limit __MAX_AI_CALLS__ reached)
+ same => n,Busy(5)
 
 ; Echo test for media sanity
 exten => 9196,1,Answer()
+ same => n,Set(TIMEOUT(absolute)=120)
  same => n,Echo()
  same => n,Hangup()
+
+exten => _X.,1,NoOp(Unknown extension ${EXTEN})
+ same => n,Hangup(1)
 
 [from-livekit]
 exten => _X.,1,NoOp(Return from LiveKit ${EXTEN})

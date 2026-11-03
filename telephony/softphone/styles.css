@@ -116,3 +116,5 @@ button:disabled {
   color: #b7c4d4;
   white-space: pre-wrap;
 }
+
+[hidden] { display: none !important; }

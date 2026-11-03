@@ -1,4 +1,5 @@
-FROM andrius/asterisk:latest
+ARG ASTERISK_IMAGE=andrius/asterisk:23
+FROM ${ASTERISK_IMAGE}
 
 USER root
 RUN mkdir -p /config /etc/asterisk

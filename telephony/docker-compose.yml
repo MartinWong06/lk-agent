@@ -5,8 +5,17 @@
 #   cp .env.example .env   # fill LIVEKIT_* and passwords
 #   docker compose up -d --build --force-recreate --scale agent=1
 #   open http://localhost:8088/
+#
+# Linux VPS / production: layer docker-compose.prod.yml on top
+#   (see scripts/vps-setup.sh and README "Deploy to a Linux VPS").
 
 name: enterprise-voice
+
+x-logging: &default-logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "5"
 
 services:
   rtpengine:
@@ -23,6 +32,7 @@ services:
     image: coturn/coturn:4.6.2
     restart: unless-stopped
     profiles: ["turn"]
+    logging: *default-logging
     command:
       - -n
       - --log-file=stdout
@@ -40,6 +50,11 @@ services:
       - --no-dtls
       - --listening-ip=0.0.0.0
       - --relay-ip=0.0.0.0
+      # Never relay to loopback / link-local (cloud metadata 169.254.169.254) peers
+      - --denied-peer-ip=0.0.0.0-0.255.255.255
+      - --denied-peer-ip=127.0.0.0-127.255.255.255
+      - --denied-peer-ip=169.254.0.0-169.254.255.255
+      - --no-tcp-relay
     ports:
       - "3478:3478/tcp"
       - "3478:3478/udp"
@@ -57,6 +72,7 @@ services:
     build:
       context: ./kamailio
     restart: unless-stopped
+    logging: *default-logging
     # Strip CR then run host-mounted entrypoint (works with stale images + Windows CRLF)
     entrypoint:
       [
@@ -73,6 +89,9 @@ services:
       ASTERISK_HOST: asterisk
       SOFTPHONE_USER: ${SOFTPHONE_USER:-1001}
       SOFTPHONE_PASSWORD: ${SOFTPHONE_PASSWORD:-change-me-softphone}
+      # Extra SIP accounts "user:pass,user2:pass2" (defaults to the softphone account)
+      SIP_USERS: ${SIP_USERS:-}
+      PRODUCTION: ${PRODUCTION:-0}
     volumes:
       - ./kamailio/entrypoint.sh:/entrypoint.sh:ro
       - ./kamailio/kamailio.cfg:/etc/kamailio/kamailio.cfg:ro
@@ -93,7 +112,10 @@ services:
   asterisk:
     build:
       context: ./asterisk
+      args:
+        ASTERISK_IMAGE: ${ASTERISK_IMAGE:-andrius/asterisk:23}
     restart: unless-stopped
+    logging: *default-logging
     environment:
       SIP_DOMAIN: ${SIP_DOMAIN:-voice.local}
       SOFTPHONE_USER: ${SOFTPHONE_USER:-1001}
@@ -106,6 +128,10 @@ services:
       EXTERNAL_SIP_IP: ${EXTERNAL_SIP_IP}
       # Browser-reachable RTP address for local softphone (not the WAN IP)
       SOFTPHONE_MEDIA_IP: ${SOFTPHONE_MEDIA_IP:-127.0.0.1}
+      # Cost guards for the LiveKit/Inference leg
+      MAX_AI_CALLS: ${MAX_AI_CALLS:-5}
+      MAX_CALL_SECONDS: ${MAX_CALL_SECONDS:-900}
+      PRODUCTION: ${PRODUCTION:-0}
     volumes:
       - ./asterisk/conf:/config:ro
       - ./asterisk/entrypoint.sh:/entrypoint.sh:ro
@@ -132,6 +158,7 @@ services:
     build:
       context: ./softphone
     restart: unless-stopped
+    logging: *default-logging
     entrypoint:
       [
         "/bin/sh",
@@ -155,6 +182,9 @@ services:
       TURN_PASSWORD: ${TURN_PASSWORD:-change-me-turn}
       KAMAILIO_HOST: kamailio
       SOFTPHONE_ENABLE_HTTPS: ${SOFTPHONE_ENABLE_HTTPS:-}
+      SOFTPHONE_BASIC_AUTH_USER: ${SOFTPHONE_BASIC_AUTH_USER:-}
+      SOFTPHONE_BASIC_AUTH_PASSWORD: ${SOFTPHONE_BASIC_AUTH_PASSWORD:-}
+      PRODUCTION: ${PRODUCTION:-0}
     volumes:
       - ./softphone/docker-entrypoint.sh:/docker-entrypoint.sh:ro
       - ./softphone/nginx.conf.template:/etc/nginx/nginx.conf.template:ro
@@ -162,7 +192,7 @@ services:
       kamailio:
         condition: service_healthy
     healthcheck:
-      test: ["CMD", "wget", "-qO-", "http://127.0.0.1/"]
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1/healthz"]
       interval: 10s
       timeout: 3s
       retries: 5
@@ -174,11 +204,11 @@ services:
     build:
       context: ../livekit-voice-agent
     restart: unless-stopped
+    logging: *default-logging
     # Host networking avoids Docker bridge WSS timeouts to LiveKit Cloud in many setups
     # Do NOT --scale agent>1 on a single Docker Desktop host (port / process flapping).
     network_mode: host
-    env_file:
-      - .env
+    # Only LiveKit credentials — the agent never needs SIP/TURN passwords
     environment:
       AGENT_CONFIG: /config/agent.yaml
       AGENT_NAME: ${AGENT_NAME:-enterprise-voice}

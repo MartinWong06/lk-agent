@@ -12,6 +12,17 @@ LIVEKIT_DID="${LIVEKIT_DID:-+15555550100}"
 EXTERNAL_SIP_IP="${EXTERNAL_SIP_IP:-}"
 # IP the BROWSER uses to reach Asterisk RTP (Docker Desktop local UI → 127.0.0.1)
 SOFTPHONE_MEDIA_IP="${SOFTPHONE_MEDIA_IP:-127.0.0.1}"
+MAX_AI_CALLS="${MAX_AI_CALLS:-5}"
+MAX_CALL_SECONDS="${MAX_CALL_SECONDS:-900}"
+case "$MAX_AI_CALLS$MAX_CALL_SECONDS" in
+  *[!0-9]*) echo "FATAL: MAX_AI_CALLS / MAX_CALL_SECONDS must be integers" >&2; exit 1 ;;
+esac
+if [ "${PRODUCTION:-0}" = "1" ]; then
+  case "$LIVEKIT_SIP_PASSWORD" in
+    change-me*|'') echo "FATAL: LIVEKIT_SIP_PASSWORD is unset or a change-me default (PRODUCTION=1)" >&2; exit 1 ;;
+  esac
+fi
+
 if [ -z "$LIVEKIT_SIP_HOST" ]; then
   echo "WARNING: LIVEKIT_SIP_HOST is empty — AI dial to LiveKit will fail until set."
   LIVEKIT_SIP_HOST="sip.invalid"
@@ -52,6 +63,8 @@ render() {
     -e "s|__EXTERNAL_SIP_IP__|${EXTERNAL_SIP_IP}|g" \
     -e "s|__SOFTPHONE_MEDIA_IP__|${SOFTPHONE_MEDIA_IP}|g" \
     -e "s|__ICE_HOST_CANDIDATES__|${ICE_HOST_CANDIDATES}|g" \
+    -e "s|__MAX_AI_CALLS__|${MAX_AI_CALLS}|g" \
+    -e "s|__MAX_CALL_SECONDS__|${MAX_CALL_SECONDS}|g" \
     > "$2"
 }
 
