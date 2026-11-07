@@ -20,6 +20,14 @@
   let callInFlight = false;
   let registered = false;
   let boundPeerConnection = null;
+  // Self-healing: reconnect after WSS/Kamailio blips (not after wrong-password).
+  let wantRegistered = false;
+  let reconnectTimer = null;
+  let reconnectAttempt = 0;
+  let reconnecting = false;
+  let authRejected = false;
+  let disconnectAt = null;
+  let sipCredentials = null;
 
   function log(msg) {
     const line = `[${new Date().toISOString().slice(11, 19)}] ${msg}`;
@@ -240,20 +248,57 @@
     }
   }
 
-  async function register() {
-    if (!window.SIP) {
-      setStatus("SIP.js failed to load (check /vendor/sip-0.21.2.min.js)", false);
-      log("window.SIP missing — softphone vendor bundle did not load");
-      return;
+  function clearReconnect() {
+    if (reconnectTimer) {
+      clearTimeout(reconnectTimer);
+      reconnectTimer = null;
     }
-    const { UserAgent, Registerer, Inviter } = SIP;
+    reconnectAttempt = 0;
+    reconnecting = false;
+    disconnectAt = null;
+  }
 
-    const sipUser = config.password ? config.authorizationUser : userEl.value.trim();
-    const sipPassword = config.password || passwordEl.value;
-    if (!sipUser || !sipPassword) {
-      setStatus("SIP user and password are required", false);
-      return;
+  function scheduleReconnect(reason) {
+    if (!wantRegistered || authRejected || reconnectTimer) return;
+    reconnectAttempt += 1;
+    const delay = Math.min(30000, 1000 * Math.pow(2, Math.min(reconnectAttempt - 1, 5)));
+    reconnecting = true;
+    setRegistered(false);
+    setStatus(`Reconnecting… (attempt ${reconnectAttempt})`, false);
+    log(`transport: disconnected (${reason}) — retry in ${delay}ms`);
+    reconnectTimer = setTimeout(() => {
+      reconnectTimer = null;
+      reconnectNow().catch((e) => {
+        log(`reconnect failed: ${e.message || e}`);
+        scheduleReconnect("retry-failed");
+      });
+    }, delay);
+  }
+
+  async function reconnectNow() {
+    if (!wantRegistered || authRejected || !sipCredentials) return;
+    log(`reconnect attempt ${reconnectAttempt}`);
+    try {
+      if (registerer) {
+        try {
+          await registerer.unregister();
+        } catch (_) {}
+      }
+      if (userAgent) {
+        try {
+          await userAgent.stop();
+        } catch (_) {}
+      }
+      userAgent = null;
+      registerer = null;
+      await startUserAgent(sipCredentials.user, sipCredentials.password, { skipMic: true });
+    } catch (e) {
+      throw e;
     }
+  }
+
+  async function startUserAgent(sipUser, sipPassword, opts) {
+    const { UserAgent, Registerer, Inviter } = SIP;
     const uri = UserAgent.makeURI(`sip:${sipUser}@${config.domain}`);
     if (!uri) {
       setStatus("Invalid SIP URI", false);
@@ -261,11 +306,17 @@
     }
 
     const iceServers = Array.isArray(config.iceServers) ? config.iceServers : [];
-    log(`ICE servers configured: ${iceServers.length} (0 = direct LAN media via Asterisk ICE host mapping)`);
+    if (!opts || !opts.skipMic) {
+      log(`ICE servers configured: ${iceServers.length} (0 = direct LAN media via Asterisk ICE host mapping)`);
+    }
 
     userAgent = new UserAgent({
       uri,
-      transportOptions: { server: config.wsServer },
+      transportOptions: {
+        server: config.wsServer,
+        // We own reconnect + re-REGISTER (SIP.js built-in reconnect alone is not enough).
+        reconnectionAttempts: 0,
+      },
       authorizationUsername: sipUser,
       authorizationPassword: sipPassword,
       displayName: config.displayName || sipUser,
@@ -283,25 +334,32 @@
       },
     };
 
-    try {
-      await ensureMicrophone();
-    } catch (e) {
-      log(`mic preflight failed: ${e.message || e}`);
-      setStatus(`Microphone required: ${e.message || e}`, false);
-      throw e;
-    }
+    userAgent.transport.stateChange.addListener((state) => {
+      log(`transport state: ${state}`);
+      if (state === "Disconnected" && wantRegistered && !authRejected) {
+        if (!disconnectAt) disconnectAt = Date.now();
+        scheduleReconnect("wss");
+      }
+      if (state === "Connected" && reconnecting) {
+        log("transport: connected");
+      }
+    });
 
     await userAgent.start();
     registerer = new Registerer(userAgent);
     registerer.stateChange.addListener((state) => {
       log(`register state: ${state}`);
       if (state === "Registered") {
+        if (disconnectAt) {
+          const sec = Math.round((Date.now() - disconnectAt) / 100) / 10;
+          log(`SELFHEAL re-registered in ${sec}s after disconnect`);
+        }
+        clearReconnect();
         setRegistered(true);
         setStatus("Registered", true);
       }
-      if (state === "Unregistered") {
+      if (state === "Unregistered" && wantRegistered && !authRejected && !reconnecting) {
         setRegistered(false);
-        setStatus("Unregistered", false);
       }
     });
     await registerer.register({
@@ -309,23 +367,73 @@
         onReject(response) {
           const code = response.message.statusCode;
           log(`REGISTER rejected ${code} ${response.message.reasonPhrase}`);
-          setStatus(code === 401 || code === 403 ? "Wrong SIP user or password" : `Register failed (${code})`, false);
+          if (code === 401 || code === 403) {
+            authRejected = true;
+            wantRegistered = false;
+            clearReconnect();
+            setStatus("Wrong SIP user or password", false);
+          } else {
+            setStatus(`Register failed (${code})`, false);
+            scheduleReconnect(`register-${code}`);
+          }
         },
       },
     });
     window._Inviter = Inviter;
   }
 
+  async function register() {
+    if (!window.SIP) {
+      setStatus("SIP.js failed to load (check /vendor/sip-0.21.2.min.js)", false);
+      log("window.SIP missing — softphone vendor bundle did not load");
+      return;
+    }
+
+    const sipUser = config.password ? config.authorizationUser : userEl.value.trim();
+    const sipPassword = config.password || passwordEl.value;
+    if (!sipUser || !sipPassword) {
+      setStatus("SIP user and password are required", false);
+      return;
+    }
+
+    authRejected = false;
+    wantRegistered = true;
+    sipCredentials = { user: sipUser, password: sipPassword };
+    clearReconnect();
+
+    try {
+      await ensureMicrophone();
+    } catch (e) {
+      log(`mic preflight failed: ${e.message || e}`);
+      setStatus(`Microphone required: ${e.message || e}`, false);
+      wantRegistered = false;
+      throw e;
+    }
+
+    await startUserAgent(sipUser, sipPassword, { skipMic: false });
+  }
+
   async function unregister() {
+    wantRegistered = false;
+    clearReconnect();
     if (session) {
       try {
         await hangup();
       } catch (_) {}
     }
-    if (registerer) await registerer.unregister();
-    if (userAgent) await userAgent.stop();
+    if (registerer) {
+      try {
+        await registerer.unregister();
+      } catch (_) {}
+    }
+    if (userAgent) {
+      try {
+        await userAgent.stop();
+      } catch (_) {}
+    }
     userAgent = null;
     registerer = null;
+    sipCredentials = null;
     setRegistered(false);
     setStatus("Unregistered", false);
   }
@@ -431,6 +539,24 @@
   btnUnreg.addEventListener("click", () => unregister().catch((e) => log(String(e))));
   btnCall.addEventListener("click", () => call().catch((e) => log(String(e))));
   btnHangup.addEventListener("click", () => hangup().catch((e) => log(String(e))));
+
+  window.addEventListener("online", () => {
+    if (wantRegistered && !authRejected) {
+      log("browser online — scheduling reconnect");
+      scheduleReconnect("online");
+    }
+  });
+  document.addEventListener("visibilitychange", () => {
+    if (
+      document.visibilityState === "visible" &&
+      wantRegistered &&
+      !authRejected &&
+      (!userAgent || !userAgent.transport || userAgent.transport.state === "Disconnected")
+    ) {
+      log("tab visible with dead transport — scheduling reconnect");
+      scheduleReconnect("visible");
+    }
+  });
 
   loadConfig().catch((e) => {
     setStatus(`Config error: ${e}`, false);
