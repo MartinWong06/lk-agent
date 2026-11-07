@@ -201,11 +201,38 @@ Dev/LAN stack (`docker-compose.yml`). Production publishes only 80, 443 and RTP.
 | 20000–20050/udp | Asterisk RTP (softphone + LiveKit) |
 | 3478, 49160–49169/udp | coturn (opt-in `turn` profile only) |
 
+## Self-healing
+
+The stack recovers from common failures without manual restarts. Proof:
+
+```bash
+sh scripts/chaos-test.sh
+# On a VPS (avoids Docker hairpin RTP issues):
+E2E_NETWORK=host sh scripts/chaos-test.sh
+```
+
+Writes `reports/self-healing-<timestamp>.md` with per-scenario MTTR (target &lt; 60s).
+
+| Layer | Mechanism |
+|-------|-----------|
+| Containers | `restart: unless-stopped` + **autoheal** restarts **unhealthy** kamailio/asterisk/softphone/agent |
+| Kamailio | Dispatcher OPTIONS probes; inactive nodes skipped; INVITE timeout → mark down + failover; fast **503** when none are up; entrypoint reloads dispatcher when Asterisk's IP changes |
+| Softphone | WSS disconnect → exponential backoff reconnect + re-REGISTER (`Reconnecting…`); wrong password never loops |
+| Agent | `fallback_model` / `fallback_voice` in `config/agent.yaml` if the primary speech model fails to start; worker health on `:8081` |
+| nginx | Docker DNS re-resolve of Kamailio; TLS cert reload loop |
+
+Optional second Asterisk for a live failover demo:
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.ha.yml up -d --build
+# A uses RTP 20000-20050; B uses 20100-20150. Stop A → next call lands on B.
+```
+
 ## HA layout
 
 Compose is single-host but **shaped for HA**:
 
-- **Kamailio** `dispatcher.list` — add more `sip:asterisk-N:5060` rows for extra Asterisk nodes
+- **Kamailio** dispatcher — `ASTERISK_HOSTS=asterisk,asterisk-b` (see `docker-compose.ha.yml`)
 - **Agents** — scale workers sharing `agent_name=enterprise-voice` (`--scale agent=2` or more)
 - **Production** — dual Kamailio behind VIP/DNS, shared registrar DB, multi-region LiveKit, autoscale agents
 

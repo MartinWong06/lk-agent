@@ -20,5 +20,9 @@ E2E_BASIC_USER=$(env_get SOFTPHONE_BASIC_AUTH_USER)
 E2E_BASIC_PASSWORD=$(env_get SOFTPHONE_BASIC_AUTH_PASSWORD)
 E2E_ENV="-e SOFTPHONE_URL=$URL -e SIP_USER=${E2E_SIP_USER:-1001} -e SIP_PASSWORD=${E2E_SIP_PASSWORD:-change-me-softphone}"
 [ -z "$E2E_BASIC_USER" ] || E2E_ENV="$E2E_ENV -e BASIC_AUTH_USER=$E2E_BASIC_USER -e BASIC_AUTH_PASSWORD=$E2E_BASIC_PASSWORD"
+# On a VPS, Docker hairpin (e2e container → public IP → own stack) often breaks RTP.
+# Set E2E_NETWORK=host so Chrome shares the host network namespace.
+E2E_DOCKER_OPTS="${E2E_DOCKER_OPTS:-}"
+[ "${E2E_NETWORK:-}" = "host" ] && E2E_DOCKER_OPTS="$E2E_DOCKER_OPTS --network host"
 
 docker build -q -t softphone-e2e tests/softphone-e2e >/dev/null
