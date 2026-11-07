@@ -175,7 +175,7 @@ services:
       - voice
     # RTP media range for Asterisk ↔ softphone/LiveKit (keep in sync with rtp.conf)
     ports:
-      - "10000-10050:10000-10050/udp"
+      - "20000-20050:20000-20050/udp"
 
   softphone:
     build:

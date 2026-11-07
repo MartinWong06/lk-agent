@@ -67,12 +67,12 @@ function Open-FirewallPorts {
     [Security.Principal.WindowsBuiltInRole]::Administrator)
   if (-not $isAdmin) {
     Write-Host 'NOTE: not elevated - skipping Windows Firewall rules. If audio is one-way/silent, rerun'
-    Write-Host '      this script as Administrator once (opens TCP 8443 and UDP 10000-10050).'
+    Write-Host '      this script as Administrator once (opens TCP 8443 and UDP 20000-20050).'
     return
   }
   $rules = @(
     @{ Name = 'EnterpriseVoice-Softphone-HTTPS'; Protocol = 'TCP'; Port = '8443' },
-    @{ Name = 'EnterpriseVoice-Asterisk-RTP'; Protocol = 'UDP'; Port = '10000-10050' }
+    @{ Name = 'EnterpriseVoice-Asterisk-RTP'; Protocol = 'UDP'; Port = '20000-20050' }
   )
   foreach ($r in $rules) {
     if (-not (Get-NetFirewallRule -DisplayName $r.Name -ErrorAction SilentlyContinue)) {

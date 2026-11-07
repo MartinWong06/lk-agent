@@ -166,7 +166,7 @@
           log(
             `ICE ${pc.iceConnectionState} — check SOFTPHONE_MEDIA_IP=<this PC's LAN IP> ` +
               "(Asterisk logs 'ice_host_candidates'), open https://<LAN>:8443/, and allow " +
-              "UDP 10000-10050 in Windows Firewall. Run scripts/doctor-windows.ps1"
+              "UDP 20000-20050 in Windows Firewall. Run scripts/doctor-windows.ps1"
           );
         }
         logMediaState(pc, "ice");

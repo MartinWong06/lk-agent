@@ -16,7 +16,7 @@
 #   1. Checks Docker + Compose >= 2.24.
 #   2. Writes production values into .env and replaces every empty / change-me secret
 #      with a random one (existing real values are kept).
-#   3. ufw: allow SSH, 80/tcp, 443/tcp, 10000-10050/udp; deny everything else inbound.
+#   3. ufw: allow SSH, 80/tcp, 443/tcp, 20000-20050/udp; deny everything else inbound.
 #   4. Starts the stack with docker-compose.prod.yml (only 80/443/RTP published).
 #   5. Issues a Let's Encrypt certificate and keeps the renewal container running.
 set -eu
@@ -152,14 +152,14 @@ if [ "$FIREWALL" = 1 ]; then
     [ -z "$SSH_PORT" ] || [ "$SSH_PORT" = 22 ] || ufw allow "$SSH_PORT/tcp" >/dev/null
     ufw allow 80/tcp >/dev/null
     ufw allow 443/tcp >/dev/null
-    ufw allow 10000:10050/udp >/dev/null
+    ufw allow 20000:20050/udp >/dev/null
     ufw default deny incoming >/dev/null
     ufw default allow outgoing >/dev/null
     ufw --force enable >/dev/null
     ufw status | sed 's/^/  /'
     echo "Note: Docker-published ports bypass ufw; the prod overlay publishes only 80, 443 and RTP."
   else
-    warn "ufw not installed — restrict inbound traffic in your provider's firewall to 22/tcp, 80/tcp, 443/tcp, 10000-10050/udp"
+    warn "ufw not installed — restrict inbound traffic in your provider's firewall to 22/tcp, 80/tcp, 443/tcp, 20000-20050/udp"
   fi
 fi
 
