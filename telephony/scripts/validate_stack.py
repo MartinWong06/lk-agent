@@ -90,6 +90,25 @@ def main() -> int:
             errors.append("docker-compose.prod.yml must not publish Kamailio ports")
         if 'PRODUCTION: "1"' not in ptext:
             errors.append("docker-compose.prod.yml must set PRODUCTION=1")
+    caddy = ROOT / "docker-compose.caddy.yml"
+    need(caddy, "caddy compose overlay")
+    if caddy.exists():
+        ctext = caddy.read_text(encoding="utf-8")
+        if "127.0.0.1:8443:443" not in ctext:
+            errors.append("docker-compose.caddy.yml must bind softphone to 127.0.0.1:8443 only")
+        if any(
+            line.strip().startswith("SOFTPHONE_HTTPS_PORT:")
+            for line in ctext.splitlines()
+        ):
+            errors.append(
+                "docker-compose.caddy.yml must NOT set SOFTPHONE_HTTPS_PORT "
+                "(keep prod.yml at 443 so browsers get wss://domain/ws)"
+            )
+    if "rtpstart=20000" not in rtp or "rtpend=20050" not in rtp:
+        errors.append("rtp.conf.template must use 20000-20050 (avoids AVR Asterisk on 10000-10050)")
+    compose_ports = (ROOT / "docker-compose.yml").read_text(encoding="utf-8")
+    if "20000-20050:20000-20050/udp" not in compose_ports:
+        errors.append("docker-compose.yml must publish 20000-20050/udp to match rtp.conf")
     agent_block = compose.split("\n  agent:", 1)[-1]
     if "env_file" in agent_block:
         errors.append("agent must not get the whole .env (SIP/TURN passwords); pass LIVEKIT_* only")

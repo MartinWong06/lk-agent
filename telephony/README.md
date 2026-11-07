@@ -145,6 +145,33 @@ Browsers on any network work without TURN as long as UDP 20000–20050 reaches t
 (Asterisk advertises the public IP). Only for callers behind UDP-blocking firewalls add
 `SOFTPHONE_TURN=1` and `--profile turn` (and open 3478 + 49160–49169/udp).
 
+### Behind Caddy / nginx (ports 80/443 already taken)
+
+If the host already runs Caddy (or nginx) on 80/443 — e.g. CRM on `crm.suarify.my` —
+layer [`docker-compose.caddy.yml`](docker-compose.caddy.yml) so the softphone binds only
+`127.0.0.1:8443` and let Caddy terminate public TLS:
+
+```bash
+sudo sh scripts/vps-setup.sh --domain platformfe.suarify.my --email you@example.com --no-up
+# Caddyfile: reverse_proxy https://127.0.0.1:8443 { transport http { tls_insecure_skip_verify } }
+docker compose -f docker-compose.yml -f docker-compose.prod.yml -f docker-compose.caddy.yml up -d --build
+```
+
+Related settings that must stay aligned:
+
+| Setting | Value behind Caddy | Why |
+|---------|--------------------|-----|
+| Softphone ports | `127.0.0.1:8443:443` only (caddy overlay) | Caddy owns public 80/443 |
+| `SOFTPHONE_HTTPS_PORT` | **`443`** (do not set 8443) | Browser WS URL must be `wss://domain/ws`, not `:8443` |
+| `SOFTPHONE_WS_SERVER` | empty | Entrypoint builds `wss://domain/ws` from the public host |
+| `SOFTPHONE_PUBLIC_HOST` | your DNS name (e.g. `platformfe.suarify.my`) | Used for WS URL + preferred page URL |
+| `SOFTPHONE_MEDIA_IP` / `EXTERNAL_SIP_IP` | VPS public IPv4 | Asterisk ICE / LiveKit SIP Contact |
+| RTP | UDP **20000–20050** (compose + `rtp.conf`) | Must match; open in ufw **and** provider firewall |
+| Certbot profile | skip | Caddy issues the public cert; softphone uses self-signed on loopback |
+
+Do **not** change `SOFTPHONE_HTTPS_PORT` to `8443` when using this overlay — that would make
+`config.json` advertise `wss://domain:8443/ws`, which is not reachable through Caddy.
+
 ## Configuration (no code edits for routine changes)
 
 | What | File / env |
