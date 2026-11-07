@@ -131,7 +131,7 @@ What is protected in production:
 
 | Layer | Protection |
 |-------|------------|
-| Network | Only 80/tcp, 443/tcp and 10000–10050/udp published (Kamailio 5060/8080, Asterisk, agent stay on the Docker network); ufw denies the rest. Docker-published ports bypass ufw, which is why the overlay publishes so little. |
+| Network | Only 80/tcp, 443/tcp and 20000–20050/udp published (Kamailio 5060/8080, Asterisk, agent stay on the Docker network); ufw denies the rest. Docker-published ports bypass ufw, which is why the overlay publishes so little. |
 | Web | TLS (Let's Encrypt), HTTP→HTTPS, HSTS, CSP / frame / referrer headers, basic auth, per-IP rate limits on pages and the WSS handshake, no server version, no build files served. |
 | SIP | Digest auth on REGISTER and every INVITE (auth user must equal From user), only INVITE/REGISTER as initial requests, no relaying to foreign domains, in-dialog requests only towards Asterisk, scanner UAs dropped, pike flood ban on direct SIP, WebSocket closed after 5 wrong passwords. |
 | Credentials | SIP password not in `config.json` (users type it), containers refuse `change-me` / short passwords, `.env` mode 600, agent only receives `LIVEKIT_*`. |
@@ -141,9 +141,36 @@ More accounts: `SIP_USERS=alice:<long-random>,bob:<long-random>` in `.env`, then
 `docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d kamailio`.
 Logs are rotated (10 MB × 5 per container): `docker compose logs -f kamailio`.
 
-Browsers on any network work without TURN as long as UDP 10000–10050 reaches the VPS
+Browsers on any network work without TURN as long as UDP 20000–20050 reaches the VPS
 (Asterisk advertises the public IP). Only for callers behind UDP-blocking firewalls add
 `SOFTPHONE_TURN=1` and `--profile turn` (and open 3478 + 49160–49169/udp).
+
+### Behind Caddy / nginx (ports 80/443 already taken)
+
+If the host already runs Caddy (or nginx) on 80/443 — e.g. CRM on `crm.suarify.my` —
+layer [`docker-compose.caddy.yml`](docker-compose.caddy.yml) so the softphone binds only
+`127.0.0.1:8443` and let Caddy terminate public TLS:
+
+```bash
+sudo sh scripts/vps-setup.sh --domain platformfe.suarify.my --email you@example.com --no-up
+# Caddyfile: reverse_proxy https://127.0.0.1:8443 { transport http { tls_insecure_skip_verify } }
+docker compose -f docker-compose.yml -f docker-compose.prod.yml -f docker-compose.caddy.yml up -d --build
+```
+
+Related settings that must stay aligned:
+
+| Setting | Value behind Caddy | Why |
+|---------|--------------------|-----|
+| Softphone ports | `127.0.0.1:8443:443` only (caddy overlay) | Caddy owns public 80/443 |
+| `SOFTPHONE_HTTPS_PORT` | **`443`** (do not set 8443) | Browser WS URL must be `wss://domain/ws`, not `:8443` |
+| `SOFTPHONE_WS_SERVER` | empty | Entrypoint builds `wss://domain/ws` from the public host |
+| `SOFTPHONE_PUBLIC_HOST` | your DNS name (e.g. `platformfe.suarify.my`) | Used for WS URL + preferred page URL |
+| `SOFTPHONE_MEDIA_IP` / `EXTERNAL_SIP_IP` | VPS public IPv4 | Asterisk ICE / LiveKit SIP Contact |
+| RTP | UDP **20000–20050** (compose + `rtp.conf`) | Must match; open in ufw **and** provider firewall |
+| Certbot profile | skip | Caddy issues the public cert; softphone uses self-signed on loopback |
+
+Do **not** change `SOFTPHONE_HTTPS_PORT` to `8443` when using this overlay — that would make
+`config.json` advertise `wss://domain:8443/ws`, which is not reachable through Caddy.
 
 ## Configuration (no code edits for routine changes)
 
@@ -171,14 +198,41 @@ Dev/LAN stack (`docker-compose.yml`). Production publishes only 80, 443 and RTP.
 | 8080 | Kamailio SIP over WebSocket |
 | 5060 | Kamailio SIP UDP/TCP |
 | 8443 | Softphone HTTPS UI + WSS → Kamailio |
-| 10000–10050/udp | Asterisk RTP (softphone + LiveKit) |
+| 20000–20050/udp | Asterisk RTP (softphone + LiveKit) |
 | 3478, 49160–49169/udp | coturn (opt-in `turn` profile only) |
+
+## Self-healing
+
+The stack recovers from common failures without manual restarts. Proof:
+
+```bash
+sh scripts/chaos-test.sh
+# On a VPS (avoids Docker hairpin RTP issues):
+E2E_NETWORK=host sh scripts/chaos-test.sh
+```
+
+Writes `reports/self-healing-<timestamp>.md` with per-scenario MTTR (target &lt; 60s).
+
+| Layer | Mechanism |
+|-------|-----------|
+| Containers | `restart: unless-stopped` + **autoheal** restarts **unhealthy** kamailio/asterisk/softphone/agent |
+| Kamailio | Dispatcher OPTIONS probes; inactive nodes skipped; INVITE timeout → mark down + failover; fast **503** when none are up; entrypoint reloads dispatcher when Asterisk's IP changes |
+| Softphone | WSS disconnect → exponential backoff reconnect + re-REGISTER (`Reconnecting…`); wrong password never loops |
+| Agent | `fallback_model` / `fallback_voice` in `config/agent.yaml` if the primary speech model fails to start; worker health on `:8081` |
+| nginx | Docker DNS re-resolve of Kamailio; TLS cert reload loop |
+
+Optional second Asterisk for a live failover demo:
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.ha.yml up -d --build
+# A uses RTP 20000-20050; B uses 20100-20150. Stop A → next call lands on B.
+```
 
 ## HA layout
 
 Compose is single-host but **shaped for HA**:
 
-- **Kamailio** `dispatcher.list` — add more `sip:asterisk-N:5060` rows for extra Asterisk nodes
+- **Kamailio** dispatcher — `ASTERISK_HOSTS=asterisk,asterisk-b` (see `docker-compose.ha.yml`)
 - **Agents** — scale workers sharing `agent_name=enterprise-voice` (`--scale agent=2` or more)
 - **Production** — dual Kamailio behind VIP/DNS, shared registrar DB, multi-region LiveKit, autoscale agents
 
@@ -211,12 +265,12 @@ Optional profile `full-media` includes an rtpengine image for advanced WebRTC br
   1. Asterisk only advertised its container IP (`172.x`) as an ICE candidate, which a Windows
      browser cannot reach. `asterisk/entrypoint.sh` now renders `rtp.conf`
      `[ice_host_candidates] <container-ip> => SOFTPHONE_MEDIA_IP,include_local_address`
-     so ICE uses the published UDP ports 10000–10050 on your LAN IP. (`include_local_address`
+     so ICE uses the published UDP ports 20000–20050 on your LAN IP. (`include_local_address`
      is required — without it Asterisk never sends its own ICE checks and DTLS never starts.)
   2. Kamailio did not `record_route()`, so the browser's ACK/BYE never reached Asterisk and
      every call was torn down ~32 s after answer.
   Checklist: `SOFTPHONE_MEDIA_IP` = this PC's LAN IP (not vEthernet/WSL `172.x`, not
-  `127.0.0.1`), open `https://<LAN>:8443/`, Windows Firewall allows UDP **10000–10050**
+  `127.0.0.1`), open `https://<LAN>:8443/`, Windows Firewall allows UDP **20000–20050**
   (bringup script adds it when run as Administrator). TURN/coturn is **not** needed on a LAN;
   it is an opt-in profile (`SOFTPHONE_TURN=1 docker compose --profile turn up -d`).
 - Softphone `WSS 1006` / INVITE `503`/`408`: Kamailio's WS listener or Asterisk was down.
@@ -249,12 +303,12 @@ Optional profile `full-media` includes an rtpengine image for advanced WebRTC br
 - `404 No trunk found` from LiveKit: wrong `LIVEKIT_SIP_HOST` (see above) or trunk numbers / `allowed_addresses` mismatch
 - Agent `Connection timeout` to LiveKit from Docker: agents use `network_mode: host` in compose for Cloud WSS
 - Set `EXTERNAL_SIP_IP` to your current public egress IP (it can rotate on cloud VMs)
-- One-way audio: open UDP 10000–10050; for remote browsers, set public IPs / TLS WSS and ICE carefully
+- One-way audio: open UDP 20000–20050; for remote browsers, set public IPs / TLS WSS and ICE carefully
 - `test-media` **echo passes** but the **AI call is silent** while agent logs show
   `user said: …` and `agent_state … -> speaking`: the agent's audio from LiveKit Cloud is not
-  getting back through your router to Asterisk. Asterisk advertises `EXTERNAL_SIP_IP:10000-10050`
+  getting back through your router to Asterisk. Asterisk advertises `EXTERNAL_SIP_IP:20000-20050`
   to LiveKit — set `EXTERNAL_SIP_IP` to your *current* public IP and port-forward UDP
-  10000–10050 (and disable "SIP ALG") on the router to this PC.
+  20000–20050 (and disable "SIP ALG") on the router to this PC.
 - `setup_sip.py` `Conflicting inbound SIP Trunks`: trunk already exists — skip the script or update
   the existing trunk in LiveKit Cloud (do not re-create the same DID)
 - On Windows with `network_mode: host` agents, prefer `--scale agent=1` for the first call test

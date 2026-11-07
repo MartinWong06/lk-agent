@@ -1,0 +1,32 @@
+# Overlay when a host reverse proxy (Caddy/nginx) already owns ports 80 and 443.
+#
+#   docker compose -f docker-compose.yml -f docker-compose.prod.yml \
+#     -f docker-compose.caddy.yml up -d --build
+#
+# Softphone listens only on 127.0.0.1:8443. Caddy terminates public TLS and
+# reverse-proxies https://YOUR_DOMAIN → https://127.0.0.1:8443 (including /ws).
+#
+# Keep SOFTPHONE_HTTPS_PORT=443 (from prod.yml): browsers still hit public :443,
+# so config.json must advertise wss://YOUR_DOMAIN/ws — NOT :8443.
+#
+# Example Caddyfile:
+#   platformfe.suarify.my {
+#       reverse_proxy https://127.0.0.1:8443 {
+#           transport http {
+#               tls_insecure_skip_verify
+#           }
+#       }
+#   }
+#
+# Skip the certbot profile — Caddy issues the public certificate.
+# Softphone falls back to a self-signed cert for the loopback hop.
+
+services:
+  softphone:
+    ports: !override
+      - "127.0.0.1:8443:443"
+    environment:
+      # Do not set SOFTPHONE_HTTPS_PORT here — leave prod.yml at "443".
+      # Empty TLS paths → self-signed for the Caddy→container hop.
+      TLS_CERT_FILE: ""
+      TLS_KEY_FILE: ""

@@ -90,14 +90,58 @@ def main() -> int:
             errors.append("docker-compose.prod.yml must not publish Kamailio ports")
         if 'PRODUCTION: "1"' not in ptext:
             errors.append("docker-compose.prod.yml must set PRODUCTION=1")
+    caddy = ROOT / "docker-compose.caddy.yml"
+    need(caddy, "caddy compose overlay")
+    if caddy.exists():
+        ctext = caddy.read_text(encoding="utf-8")
+        if "127.0.0.1:8443:443" not in ctext:
+            errors.append("docker-compose.caddy.yml must bind softphone to 127.0.0.1:8443 only")
+        if any(
+            line.strip().startswith("SOFTPHONE_HTTPS_PORT:")
+            for line in ctext.splitlines()
+        ):
+            errors.append(
+                "docker-compose.caddy.yml must NOT set SOFTPHONE_HTTPS_PORT "
+                "(keep prod.yml at 443 so browsers get wss://domain/ws)"
+            )
+    if "__RTP_PORT_START__" not in rtp or "__RTP_PORT_END__" not in rtp:
+        errors.append("rtp.conf.template must render RTP_PORT_START/END (ha / multi-Asterisk)")
+    if "RTP_PORT_START:-20000" not in compose and "RTP_PORT_START" not in compose:
+        errors.append("docker-compose.yml must pass RTP_PORT_START/END (default 20000-20050)")
     agent_block = compose.split("\n  agent:", 1)[-1]
     if "env_file" in agent_block:
         errors.append("agent must not get the whole .env (SIP/TURN passwords); pass LIVEKIT_* only")
 
+    # Self-healing
+    if "willfarrell/autoheal" not in compose:
+        errors.append("compose must include autoheal for unhealthy-container restarts")
+    if 'autoheal: "true"' not in compose and "x-autoheal" not in compose:
+        errors.append("kamailio/asterisk/softphone/agent must be labelled for autoheal")
+    if "8081" not in agent_block:
+        errors.append("agent healthcheck must probe LiveKit worker :8081")
+    for needle, why in (
+        ("ds_ping_interval", "dispatcher must probe Asterisk"),
+        ("DS_FAILOVER", "failure_route must fail over INVITEs"),
+        ("SELFHEAL asterisk-down", "dst-down events must be logged"),
+        ("SELFHEAL asterisk-up", "dst-up events must be logged"),
+        ("no-active-asterisk", "must return fast 503 when no Asterisk is up"),
+    ):
+        if needle not in kam_cfg:
+            errors.append(f"kamailio.cfg: {why}")
+    kam_ep = (ROOT / "kamailio" / "entrypoint.sh").read_text(encoding="utf-8")
+    if "dispatcher.reload" not in kam_ep:
+        errors.append("kamailio entrypoint must reload dispatcher when Asterisk IP changes")
+    soft_js = (ROOT / "softphone" / "app.js").read_text(encoding="utf-8")
+    if "scheduleReconnect" not in soft_js or "SELFHEAL re-registered" not in soft_js:
+        errors.append("softphone app.js must auto-reconnect WSS and re-REGISTER")
+    need(ROOT / "scripts" / "chaos-test.sh", "chaos / self-healing proof script")
+    need(ROOT / "docker-compose.ha.yml", "HA second-Asterisk overlay")
+    need(ROOT / "tests" / "softphone-e2e" / "probe.mjs", "invite/watch probe for chaos tests")
+
     agent_yaml = ROOT / "config" / "agent.yaml"
     if agent_yaml.exists():
         text = agent_yaml.read_text(encoding="utf-8")
-        for key in ("agent_name:", "model:", "voice:", "instructions:"):
+        for key in ("agent_name:", "model:", "voice:", "instructions:", "fallback_model:"):
             if key not in text:
                 errors.append(f"agent.yaml missing {key}")
 

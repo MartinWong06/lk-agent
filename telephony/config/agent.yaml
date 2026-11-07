@@ -6,6 +6,10 @@
 agent_name: enterprise-voice
 model: openai/gpt-realtime-2.1-mini
 voice: marin
+# If the primary model fails to start (quota, outage, bad id), the worker retries once
+# with this model. Leave empty to disable. Prefer a different Inference speech model.
+fallback_model: openai/gpt-realtime-2.1
+fallback_voice: marin
 instructions: |
   You are an upbeat, slightly sarcastic voice AI for tech support.
   Help the caller fix issues without rambling, and keep replies under 3 sentences.

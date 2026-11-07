@@ -3,7 +3,7 @@
 #   docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d --build
 #
 # Differences from the LAN/dev stack:
-#   - Only 80/tcp, 443/tcp (softphone + WSS) and 10000-10050/udp (RTP) are published.
+#   - Only 80/tcp, 443/tcp (softphone + WSS) and 20000-20050/udp (RTP) are published.
 #     Kamailio SIP/WS and Asterisk are reachable only inside the Docker network.
 #   - PRODUCTION=1: entrypoints refuse change-me / short passwords, the SIP password
 #     is NOT published in config.json (users log in on the page), no SIP trace,

@@ -14,9 +14,16 @@ EXTERNAL_SIP_IP="${EXTERNAL_SIP_IP:-}"
 SOFTPHONE_MEDIA_IP="${SOFTPHONE_MEDIA_IP:-127.0.0.1}"
 MAX_AI_CALLS="${MAX_AI_CALLS:-5}"
 MAX_CALL_SECONDS="${MAX_CALL_SECONDS:-900}"
-case "$MAX_AI_CALLS$MAX_CALL_SECONDS" in
-  *[!0-9]*) echo "FATAL: MAX_AI_CALLS / MAX_CALL_SECONDS must be integers" >&2; exit 1 ;;
+RTP_PORT_START="${RTP_PORT_START:-20000}"
+RTP_PORT_END="${RTP_PORT_END:-20050}"
+case "$MAX_AI_CALLS$MAX_CALL_SECONDS$RTP_PORT_START$RTP_PORT_END" in
+  *[!0-9]*) echo "FATAL: MAX_AI_CALLS / MAX_CALL_SECONDS / RTP_PORT_* must be integers" >&2; exit 1 ;;
 esac
+if [ "$RTP_PORT_END" -lt "$RTP_PORT_START" ]; then
+  echo "FATAL: RTP_PORT_END ($RTP_PORT_END) < RTP_PORT_START ($RTP_PORT_START)" >&2
+  exit 1
+fi
+
 if [ "${PRODUCTION:-0}" = "1" ]; then
   case "$LIVEKIT_SIP_PASSWORD" in
     change-me*|'') echo "FATAL: LIVEKIT_SIP_PASSWORD is unset or a change-me default (PRODUCTION=1)" >&2; exit 1 ;;
@@ -65,6 +72,8 @@ render() {
     -e "s|__ICE_HOST_CANDIDATES__|${ICE_HOST_CANDIDATES}|g" \
     -e "s|__MAX_AI_CALLS__|${MAX_AI_CALLS}|g" \
     -e "s|__MAX_CALL_SECONDS__|${MAX_CALL_SECONDS}|g" \
+    -e "s|__RTP_PORT_START__|${RTP_PORT_START}|g" \
+    -e "s|__RTP_PORT_END__|${RTP_PORT_END}|g" \
     > "$2"
 }
 

@@ -1,7 +1,8 @@
 [general]
-; Narrow range for Docker Desktop UDP publish reliability (must match compose ports)
-rtpstart=10000
-rtpend=10050
+; Must match the UDP ports published for this Asterisk container
+; (defaults 20000-20050; asterisk-b / ha profile uses 20100-20150).
+rtpstart=__RTP_PORT_START__
+rtpend=__RTP_PORT_END__
 icesupport=yes
 strictrtp=no
 bindaddr=0.0.0.0
@@ -10,6 +11,6 @@ bindaddr=0.0.0.0
 
 ; Browser WebRTC (Docker bridge): Asterisk only sees its container IP (172.x), which
 ; a browser on the host/LAN cannot reach. The entrypoint maps it to SOFTPHONE_MEDIA_IP
-; so ICE targets the published RTP ports (10000-10050/udp) instead.
+; so ICE targets the published RTP ports instead.
 [ice_host_candidates]
 __ICE_HOST_CANDIDATES__
