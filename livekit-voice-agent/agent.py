@@ -188,15 +188,16 @@ class Assistant(Agent):
                     logger.warning("on_enter: could not read SpeechHandle.exception: %s", probe_err)
             if exc is not None:
                 logger.error(
-                    "on_enter: generate_reply declined/failed: %s "
-                    "(check LiveKit Billing → Inference credits on Build plan)",
+                    "SELFHEAL on_enter: generate_reply declined/failed: %s "
+                    "(check LiveKit Billing → Inference credits; "
+                    "set fallback_model in agent.yaml for next call)",
                     exc,
                 )
             else:
                 logger.info("on_enter: generate_reply completed without exception")
         except Exception:
             logger.exception(
-                "on_enter: generate_reply raised "
+                "SELFHEAL on_enter: generate_reply raised "
                 "(check LiveKit Billing → Inference credits / realtime session)"
             )
 
@@ -213,52 +214,31 @@ AGENT_NAME = str(AGENT_CFG.get("agent_name") or "enterprise-voice")
 server = AgentServer()
 
 
+def _model_candidates(cfg: dict[str, Any]) -> list[tuple[str, str]]:
+    """Primary then optional fallback model/voice pairs (deduped)."""
+    primary = (
+        str(cfg.get("model") or DEFAULT_MODEL),
+        str(cfg.get("voice") or "marin"),
+    )
+    out = [primary]
+    fb_model = str(cfg.get("fallback_model") or "").strip()
+    if fb_model:
+        fb_voice = str(cfg.get("fallback_voice") or primary[1])
+        pair = (fb_model, fb_voice)
+        if pair != primary:
+            out.append(pair)
+    return out
+
+
 @server.rtc_session(agent_name=AGENT_NAME)
 async def entrypoint(ctx: JobContext):
     # Speech-to-speech via Inference: DuplexModel for gpt-live-*, else RealtimeModel.
-    model = str(AGENT_CFG.get("model") or DEFAULT_MODEL)
-    voice = str(AGENT_CFG.get("voice") or "marin")
-    logger.info(
-        "Starting session model=%s voice=%s duplex=%s room=%s",
-        model,
-        voice,
-        is_duplex_model(model),
-        ctx.room.name,
-    )
-    session = AgentSession(llm=build_speech_llm(model, voice))
-
+    # Self-healing: if the primary model fails to start, retry once with fallback_model.
+    candidates = _model_candidates(AGENT_CFG)
     usage_collector = metrics.UsageCollector()
     last_eou_metrics: metrics.EOUMetrics | None = None
     saw_speaking = False
-
-    @session.on("metrics_collected")
-    def _on_metrics_collected(ev: MetricsCollectedEvent) -> None:
-        nonlocal last_eou_metrics
-        if ev.metrics.type == "eou_metrics":
-            last_eou_metrics = ev.metrics
-
-        metrics.log_metrics(ev.metrics)
-        usage_collector.collect(ev.metrics)
-
-    @session.on("agent_state_changed")
-    def _on_agent_state_changed(ev: AgentStateChangedEvent) -> None:
-        nonlocal saw_speaking
-        logger.info("agent_state %s -> %s", ev.old_state, ev.new_state)
-        if ev.new_state == "speaking":
-            saw_speaking = True
-            if last_eou_metrics:
-                elapsed = time.time() - last_eou_metrics.timestamp
-                logger.info("Time to first audio: %.3fs", elapsed)
-
-    @session.on("user_input_transcribed")
-    def _on_user_input(ev: UserInputTranscribedEvent) -> None:
-        if ev.is_final:
-            logger.info("user said: %s", ev.transcript)
-
-    @session.on("error")
-    def _on_error(ev) -> None:
-        err = getattr(ev, "error", ev)
-        logger.error("session error: %s", err)
+    last_err: Exception | None = None
 
     async def log_usage() -> None:
         summary = usage_collector.get_summary()
@@ -273,15 +253,75 @@ async def entrypoint(ctx: JobContext):
 
     ctx.add_shutdown_callback(log_usage)
 
-    await session.start(
-        agent=Assistant(AGENT_CFG),
-        room=ctx.room,
-        room_options=room_io.RoomOptions(
-            audio_input=room_io.AudioInputOptions(
-                noise_cancellation=select_noise_cancellation,
-            ),
-        ),
-    )
+    for idx, (model, voice) in enumerate(candidates):
+        logger.info(
+            "Starting session model=%s voice=%s duplex=%s room=%s attempt=%s/%s",
+            model,
+            voice,
+            is_duplex_model(model),
+            ctx.room.name,
+            idx + 1,
+            len(candidates),
+        )
+        try:
+            session = AgentSession(llm=build_speech_llm(model, voice))
+
+            @session.on("metrics_collected")
+            def _on_metrics_collected(ev: MetricsCollectedEvent) -> None:
+                nonlocal last_eou_metrics
+                if ev.metrics.type == "eou_metrics":
+                    last_eou_metrics = ev.metrics
+                metrics.log_metrics(ev.metrics)
+                usage_collector.collect(ev.metrics)
+
+            @session.on("agent_state_changed")
+            def _on_agent_state_changed(ev: AgentStateChangedEvent) -> None:
+                nonlocal saw_speaking
+                logger.info("agent_state %s -> %s", ev.old_state, ev.new_state)
+                if ev.new_state == "speaking":
+                    saw_speaking = True
+                    if last_eou_metrics:
+                        elapsed = time.time() - last_eou_metrics.timestamp
+                        logger.info("Time to first audio: %.3fs", elapsed)
+
+            @session.on("user_input_transcribed")
+            def _on_user_input(ev: UserInputTranscribedEvent) -> None:
+                if ev.is_final:
+                    logger.info("user said: %s", ev.transcript)
+
+            @session.on("error")
+            def _on_error(ev) -> None:
+                err = getattr(ev, "error", ev)
+                logger.error("session error: %s", err)
+
+            await session.start(
+                agent=Assistant(AGENT_CFG),
+                room=ctx.room,
+                room_options=room_io.RoomOptions(
+                    audio_input=room_io.AudioInputOptions(
+                        noise_cancellation=select_noise_cancellation,
+                    ),
+                ),
+            )
+            if idx > 0:
+                logger.warning(
+                    "SELFHEAL session started with fallback_model=%s voice=%s "
+                    "(primary failed earlier)",
+                    model,
+                    voice,
+                )
+            return
+        except Exception as err:
+            last_err = err
+            logger.exception(
+                "SELFHEAL model=%s voice=%s failed to start: %s",
+                model,
+                voice,
+                err,
+            )
+
+    if last_err is not None:
+        raise last_err
 
 
 if __name__ == "__main__":
