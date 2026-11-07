@@ -1,0 +1,69 @@
+# Optional second Asterisk for SIP failover demos (self-healing).
+#
+#   docker compose -f docker-compose.yml -f docker-compose.ha.yml up -d --build
+#
+# Kamailio probes both nodes and fails over INVITEs when A is down.
+# Asterisk B uses RTP 20100-20150 so it does not clash with A (20000-20050)
+# or with a co-hosted AVR Asterisk on 10000-10050.
+#
+# Chaos demo:  docker compose stop asterisk
+#              → next INVITE lands on asterisk-b (or fast 503 if B is also down).
+
+services:
+  kamailio:
+    environment:
+      ASTERISK_HOSTS: asterisk,asterisk-b
+    depends_on:
+      asterisk:
+        condition: service_healthy
+      asterisk-b:
+        condition: service_healthy
+
+  asterisk-b:
+    build:
+      context: ./asterisk
+      args:
+        ASTERISK_IMAGE: ${ASTERISK_IMAGE:-andrius/asterisk:23}
+    restart: unless-stopped
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "5"
+    environment:
+      SIP_DOMAIN: ${SIP_DOMAIN:-voice.local}
+      SOFTPHONE_USER: ${SOFTPHONE_USER:-1001}
+      SOFTPHONE_PASSWORD: ${SOFTPHONE_PASSWORD:-change-me-softphone}
+      AI_EXTENSION: ${AI_EXTENSION:-1000}
+      LIVEKIT_SIP_HOST: ${LIVEKIT_SIP_HOST}
+      LIVEKIT_SIP_USERNAME: ${LIVEKIT_SIP_USERNAME:-asterisk-trunk}
+      LIVEKIT_SIP_PASSWORD: ${LIVEKIT_SIP_PASSWORD:-change-me-trunk-password}
+      LIVEKIT_DID: ${LIVEKIT_DID:-+15555550100}
+      EXTERNAL_SIP_IP: ${EXTERNAL_SIP_IP}
+      SOFTPHONE_MEDIA_IP: ${SOFTPHONE_MEDIA_IP:-127.0.0.1}
+      MAX_AI_CALLS: ${MAX_AI_CALLS:-5}
+      MAX_CALL_SECONDS: ${MAX_CALL_SECONDS:-900}
+      RTP_PORT_START: "20100"
+      RTP_PORT_END: "20150"
+      PRODUCTION: ${PRODUCTION:-0}
+    volumes:
+      - ./asterisk/conf:/config:ro
+      - ./asterisk/entrypoint.sh:/entrypoint.sh:ro
+    entrypoint:
+      [
+        "/bin/sh",
+        "-c",
+        "tr -d '\\r' < /entrypoint.sh > /tmp/ep.sh && exec /bin/sh /tmp/ep.sh",
+      ]
+    healthcheck:
+      test: ["CMD-SHELL", "asterisk -rx 'pjsip show endpoint from-kamailio' 2>/dev/null | grep -q 'Endpoint:  from-kamailio' || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 60s
+    labels:
+      autoheal: "true"
+    networks:
+      - voice
+    ports:
+      - "20100-20150:20100-20150/udp"
